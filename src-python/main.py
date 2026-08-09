@@ -53,9 +53,9 @@ def main():
     
     try:
         # Выполнение запроса и загрузка в DataFrame
-        df = pl.read_database(
+        df = pl.read_database_uri(
             query=sql,
-            connection=args.conn,
+            uri=args.conn,
             engine="connectorx",
             **kwargs
         )
