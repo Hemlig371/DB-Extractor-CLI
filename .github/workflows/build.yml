@@ -19,10 +19,11 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
+        cache: 'pip'
         
     - name: Install dependencies
       run: |
-        python -m pip install --disable-pip-version-check -r requirements.txt
+        python -m pip install --prefer-binary --no-cache-dir -r requirements.txt
         
     - name: Build with PyInstaller
       run: |
@@ -35,3 +36,4 @@ jobs:
         path: |
           dist/db-extractor.exe
           dist/db-extractor
+        if-no-files-found: ignore
