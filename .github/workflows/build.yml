@@ -26,13 +26,31 @@ jobs:
         
     - name: Build with PyInstaller
       run: |
-        pyinstaller --name db-extractor --onefile --collect-all connectorx --collect-all polars --collect-all pyarrow src-python/main.py
+        pyinstaller --name db-extractor-${{ runner.os }} --onefile --collect-all connectorx --collect-all polars --collect-all pyarrow src-python/main.py
         
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: db-extractor-${{ runner.os }}
-        path: |
-          dist/db-extractor.exe
-          dist/db-extractor
+        path: dist/db-extractor-${{ runner.os }}*
         if-no-files-found: ignore
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+          
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
