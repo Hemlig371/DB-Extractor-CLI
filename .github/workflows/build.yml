@@ -26,13 +26,19 @@ jobs:
         
     - name: Build with PyInstaller
       run: |
-        pyinstaller --name db-extractor-${{ runner.os }} --onefile --collect-all connectorx --collect-all polars --collect-all pyarrow src-python/main.py
+        pyinstaller --name db-extractor-${{ runner.os }} --onedir --collect-all connectorx --collect-all polars --collect-all pyarrow src-python/main.py
+        
+    - name: Zip the application
+      shell: python
+      run: |
+        import shutil
+        shutil.make_archive('dist/db-extractor-${{ runner.os }}', 'zip', 'dist/db-extractor-${{ runner.os }}')
         
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: db-extractor-${{ runner.os }}
-        path: dist/db-extractor-${{ runner.os }}*
+        path: dist/db-extractor-${{ runner.os }}.zip
         if-no-files-found: ignore
 
   release:
