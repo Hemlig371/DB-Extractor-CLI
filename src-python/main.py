@@ -90,6 +90,9 @@ def extract_dx_params(query_str, args):
         if parts[1].isdigit():
             comp_lvl = int(parts[1])
 
+    if comp_val == "gz":
+        comp_val = "gzip"
+
     params = {
         "query": query_str,
         "out": args.out,
@@ -114,7 +117,10 @@ def extract_dx_params(query_str, args):
     comp_match = re.search(r'--\s*@DX_COMPRESSION:\s*([^\s]+)', query_str, re.IGNORECASE)
     if comp_match:
         comp_parts = comp_match.group(1).split(':')
-        params["compression"] = comp_parts[0].lower()
+        c_val = comp_parts[0].lower()
+        if c_val == "gz":
+            c_val = "gzip"
+        params["compression"] = c_val
         if len(comp_parts) > 1 and comp_parts[1].isdigit():
             params["compression_level"] = int(comp_parts[1])
 
@@ -169,7 +175,8 @@ def process_query(item, idx, total, args):
     # Определяем формат вывода
     fmt = item["format"]
     if not fmt:
-        ext = os.path.splitext(current_out)[1].lower()
+        base_name = re.sub(r'\.(gz|zstd|zst|zip)$', '', current_out, flags=re.IGNORECASE)
+        ext = os.path.splitext(base_name)[1].lower()
         if ext == ".csv":
             fmt = "csv"
         elif ext == ".parquet":
@@ -181,6 +188,14 @@ def process_query(item, idx, total, args):
         else:
             if not args.quiet: print(f"Error: Could not infer format from output file '{current_out}'.")
             return False
+
+    # Автоматически определяем сжатие по расширению, если оно не было явно задано
+    if not item["compression"]:
+        lower_out = current_out.lower()
+        if lower_out.endswith(".gz"):
+            item["compression"] = "gzip"
+        elif lower_out.endswith(".zst") or lower_out.endswith(".zstd"):
+            item["compression"] = "zstd"
 
     if not args.quiet:
         print(f"\n[{idx+1}/{total}] Executing query -> {current_out} ...")
@@ -300,7 +315,7 @@ def main():
     
     parser.add_argument("--out", required=False, help="Output file path (default if not specified in query)")
     parser.add_argument("--format", choices=["csv", "parquet", "arrow", "jsonl"], help="Output format (default: infer from output extension)")
-    parser.add_argument("--compression", help="Compression algorithm and optional level (e.g., 'zstd', 'zstd:10', 'gzip:6')")
+    parser.add_argument("--compression", help="Compression algorithm and optional level (e.g., 'zstd', 'zstd:10', 'gzip')")
     parser.add_argument("--fill-nulls", nargs='*', help="Fill nulls with default values ('null' for text, 0 for numbers) in specified columns (or all if not specified)")
     parser.add_argument("--drop-nulls", nargs='*', help="Drop rows with nulls in specified columns (or all if no columns specified)")
     parser.add_argument("--utc", action="store_true", help="Convert datetimes to UTC")
