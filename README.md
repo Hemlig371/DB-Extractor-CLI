@@ -22,6 +22,7 @@ db-extractor --conn <CONNECTION_STRING> [ОПЦИИ]
 - `--compression` : Алгоритм сжатия и (опционально) уровень сжатия через двоеточие. Примеры: `zstd`, `zstd:10`, `gzip:6`. Для Parquet по умолчанию `zstd`, для CSV — без сжатия.
 - `--partition-on` : Имя числовой колонки (обычно ID) для параллельной выгрузки (ConnectorX).
 - `--partitions` : Количество потоков/партиций (работает вместе с `--partition-on`).
+- `--cast-universal` : Приведение типов исходной БД к универсальному arrow формату для корректного чтения в принимающей БД.
 
 ### Дополнительные возможности:
 - `--continue-on-error` : Продолжить выполнение остальных запросов при ошибке в одном из них. При этом утилита всё равно вернёт код ошибки (`exit 1`) в самом конце, если были упавшие запросы.
@@ -58,7 +59,7 @@ SELECT * FROM reports WHERE year = 2023;
 -- @DX_UTC
 SELECT * FROM users WHERE active = true;
 ```
-Доступные аннотации: `@DX_OUT`, `@DX_FORMAT`, `@DX_COMPRESSION`, `@DX_PARTITION_ON`, `@DX_PARTITIONS`, `@DX_FILL_NULLS`, `@DX_DROP_NULLS`, `@DX_UTC`, `@DX_CATEGORIZE`, `@DX_HASH_COLUMNS`.
+Доступные аннотации: `@DX_OUT`, `@DX_FORMAT`, `@DX_COMPRESSION`, `@DX_PARTITION_ON`, `@DX_PARTITIONS`, `@DX_FILL_NULLS`, `@DX_DROP_NULLS`, `@DX_UTC`, `@DX_CATEGORIZE`, `@DX_HASH_COLUMNS`, `@DX_CAST_UNIVERSAL`.
 Параметры в комментариях переопределяют глобальные параметры (переданные через CLI).
 
 ### 3. Автоматическое логирование
