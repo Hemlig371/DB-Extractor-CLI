@@ -105,7 +105,8 @@ def extract_dx_params(query_str, args):
         "drop_nulls": args.drop_nulls,
         "utc": args.utc,
         "categorize": args.categorize,
-        "hash_columns": args.hash_columns
+        "hash_columns": args.hash_columns,
+        "cast_universal": args.cast_universal
     }
     
     out_match = re.search(r'--\s*@DX_OUT:\s*([^\s]+)', query_str, re.IGNORECASE)
@@ -148,6 +149,9 @@ def extract_dx_params(query_str, args):
 
     hash_match = re.search(r'--\s*@DX_HASH_COLUMNS:\s*(.+)', query_str, re.IGNORECASE)
     if hash_match: params["hash_columns"] = [c.strip() for c in hash_match.group(1).split(',')]
+
+    cast_uni_match = re.search(r'--\s*@DX_CAST_UNIVERSAL', query_str, re.IGNORECASE)
+    if cast_uni_match: params["cast_universal"] = True
         
     return params
 
@@ -263,10 +267,48 @@ def process_query(item, idx, total, args):
                 if valid_cols:
                     df = df.drop_nulls(subset=valid_cols)
         
+        if item.get("cast_universal"):
+            uni_exprs = []
+            for col, dtype in df.schema.items():
+                if isinstance(dtype, pl.Decimal):
+                    s_utf8 = df[col].cast(pl.Utf8)
+                    orig_nulls = s_utf8.null_count()
+                    
+                    # 1. Пробуем Int64, если шкала 0
+                    casted = False
+                    if dtype.scale == 0:
+                        s_int = s_utf8.cast(pl.Int64, strict=False)
+                        if s_int.null_count() == orig_nulls:
+                            uni_exprs.append(pl.col(col).cast(pl.Utf8).cast(pl.Int64, strict=False))
+                            casted = True
+                    
+                    # 2. Пробуем Float64 (для дробных или если Int64 дал new nulls)
+                    if not casted:
+                        s_float = s_utf8.cast(pl.Float64, strict=False)
+                        if s_float.null_count() == orig_nulls:
+                            uni_exprs.append(pl.col(col).cast(pl.Utf8).cast(pl.Float64, strict=False))
+                        else:
+                            # 3. Фолбэк на Utf8, если ничего не подошло
+                            uni_exprs.append(pl.col(col).cast(pl.Utf8))
+
+                elif isinstance(dtype, pl.Datetime):
+                    c = pl.col(col).dt.cast_time_unit("us")
+                    if dtype.time_zone is not None:
+                        c = c.dt.convert_time_zone("UTC").dt.replace_time_zone(None)
+                    uni_exprs.append(c)
+                elif dtype in (pl.Object, pl.Unknown, pl.Categorical, pl.Int128):
+                    uni_exprs.append(pl.col(col).cast(pl.Utf8))
+            if uni_exprs:
+                df = df.with_columns(uni_exprs)
+
         row_count = len(df)
         if not args.quiet:
             print(f"Extracted and processed {row_count} rows. Saving to {current_out}...")
         
+        out_dir = os.path.dirname(current_out)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
         if fmt == "csv":
             csv_comp = None
             if item["compression"] in ["gzip", "zstd"]:
@@ -321,6 +363,7 @@ def main():
     parser.add_argument("--utc", action="store_true", help="Convert datetimes to UTC")
     parser.add_argument("--categorize", nargs='+', help="List of columns to convert to categorical")
     parser.add_argument("--hash-columns", nargs='+', help="List of columns to hash (e.g. for PII)")
+    parser.add_argument("--cast-universal", action="store_true", help="Cast complex/database-specific types (Decimal, Datetime, Objects) to universal Parquet/Arrow compatible types")
     parser.add_argument("--partition-on", help="Column name to partition on (for connectorx)")
     parser.add_argument("--partitions", type=int, help="Number of partitions (requires --partition-on)")
     parser.add_argument("--continue-on-error", action="store_true", help="Continue executing remaining queries if one fails")
