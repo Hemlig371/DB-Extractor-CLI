@@ -90,7 +90,7 @@ impl Sink for TextSink {
         self.buf.clear();
         match self.mode {
             Mode::Csv => textfmt::csv_rows(batch, &mut self.buf)?,
-            Mode::Json => textfmt::jsonl_rows(batch, &mut self.buf)?,
+            Mode::Json | Mode::Text => textfmt::jsonl_rows(batch, &mut self.buf)?,
         }
         self.out.write_all(&self.buf).map_err(err)
     }
