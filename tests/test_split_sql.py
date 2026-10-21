@@ -6,8 +6,8 @@ from helpers import dbx
 split = dbx.split_sql_queries
 
 
-class SplitCharacterization(unittest.TestCase):
-    """Поведение, которое должно сохраниться без изменений."""
+class SplitBasics(unittest.TestCase):
+    """Разбиение по `;`, строки и комментарии."""
 
     def check(self, sql, expected):
         self.assertEqual(split(sql), expected, msg=repr(sql))
@@ -51,8 +51,8 @@ class SplitCharacterization(unittest.TestCase):
         self.check("/* c */ select 1", ["/* c */ select 1"])
 
 
-class SplitFixes(unittest.TestCase):
-    """Дефекты 6: комментарий-хвост и диалектные литералы."""
+class SplitDialects(unittest.TestCase):
+    """Комментарий в конце и диалектные литералы."""
 
     def check(self, sql, expected):
         self.assertEqual(split(sql), expected, msg=repr(sql))

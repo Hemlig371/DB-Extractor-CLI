@@ -20,6 +20,7 @@ pub struct BaseOptions {
     pub categorize: Option<Vec<String>>,
     pub hash_columns: Option<Vec<String>>,
     pub cast_universal: bool,
+    pub decimal_as: Option<String>,
 }
 
 /// Итоговые параметры одного запроса.
@@ -39,8 +40,13 @@ pub struct QueryParams {
     pub categorize: Option<Vec<String>>,
     pub hash_columns: Option<Vec<String>>,
     pub cast_universal: bool,
+    /// `float`, `decimal` или `string`; None: `float` при `cast_universal`, иначе `decimal`.
+    pub decimal_as: Option<String>,
     pub warnings: Vec<String>,
 }
+
+/// Допустимые значения `--decimal-as` и `@DX_DECIMAL_AS`.
+pub const DECIMAL_MODES: [&str; 3] = ["float", "decimal", "string"];
 
 fn is_word(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
@@ -161,6 +167,7 @@ pub fn extract_dx_params(query: &str, base: &BaseOptions) -> QueryParams {
         categorize: base.categorize.clone(),
         hash_columns: base.hash_columns.clone(),
         cast_universal: base.cast_universal,
+        decimal_as: base.decimal_as.clone(),
         warnings: Vec::new(),
     };
 
@@ -241,6 +248,19 @@ pub fn extract_dx_params(query: &str, base: &BaseOptions) -> QueryParams {
         params.cast_universal = true;
     }
 
+    if let Some(v) = value_of("DECIMAL_AS", &mut warnings) {
+        let mode = first_token(&v).unwrap_or("").to_lowercase();
+        if DECIMAL_MODES.contains(&mode.as_str()) {
+            params.decimal_as = Some(mode);
+        } else {
+            warnings.push(format!(
+                "Ignoring @DX_DECIMAL_AS: '{}' is not one of {}.",
+                v,
+                DECIMAL_MODES.join(", ")
+            ));
+        }
+    }
+
     params.warnings = warnings;
     params
 }
@@ -275,6 +295,7 @@ mod tests {
             categorize: Some(vec!["c".into()]),
             hash_columns: Some(vec!["h".into()]),
             cast_universal: true,
+            decimal_as: Some("string".into()),
             ..Default::default()
         };
         let p = ex_with("SELECT 1", base);
@@ -284,6 +305,7 @@ mod tests {
         assert_eq!(p.fill_nulls, Some(vec!["a".to_string()]));
         assert_eq!(p.drop_nulls, Some(vec![]));
         assert!(p.utc && p.cast_universal);
+        assert_eq!(p.decimal_as.as_deref(), Some("string"));
         assert_eq!(p.categorize, Some(vec!["c".to_string()]));
         assert_eq!(p.hash_columns, Some(vec!["h".to_string()]));
     }
@@ -462,5 +484,34 @@ mod tests {
         assert_eq!(p.partitions, None);
         assert!(!p.warnings.is_empty());
         assert_eq!(ex("-- @DX_PARTITIONS: 8\nSELECT 1").partitions, Some(8));
+    }
+
+    #[test]
+    fn decimal_as_annotation() {
+        assert_eq!(
+            ex("-- @DX_DECIMAL_AS: String\nSELECT 1").decimal_as.as_deref(),
+            Some("string")
+        );
+        assert_eq!(ex("SELECT 1").decimal_as, None);
+        let base = BaseOptions {
+            decimal_as: Some("string".into()),
+            ..Default::default()
+        };
+        let p = ex_with("-- @DX_DECIMAL_AS: float\nSELECT 1", base);
+        assert_eq!(p.decimal_as.as_deref(), Some("float"));
+    }
+
+    #[test]
+    fn decimal_as_unknown_value_is_ignored_with_warning() {
+        let base = BaseOptions {
+            decimal_as: Some("float".into()),
+            ..Default::default()
+        };
+        let p = ex_with("-- @DX_DECIMAL_AS: number\nSELECT 1", base);
+        assert_eq!(p.decimal_as.as_deref(), Some("float"));
+        assert_eq!(
+            p.warnings,
+            vec!["Ignoring @DX_DECIMAL_AS: 'number' is not one of float, decimal, string.".to_string()]
+        );
     }
 }

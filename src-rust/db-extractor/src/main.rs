@@ -184,7 +184,6 @@ fn main() {
         queries.push(item);
     }
 
-    // Два запроса не должны писать в один файл
     let mut seen: HashMap<String, usize> = HashMap::new();
     for (idx, item) in queries.iter().enumerate() {
         let out = item.out.clone().unwrap_or_default();

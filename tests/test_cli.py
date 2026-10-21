@@ -340,7 +340,6 @@ class WritingFiles(CliTestCase):
         self.assertIn("disk full", r.log)
         self.assertNotIn("Database Error", r.out)
 
-    # --- параметры записи ---------------------------------------------------
     def test_parquet_defaults_to_zstd(self):
         r = self.run_cli(BASE + ["--query", "select 1", "--out", "o.parquet"])
         kind, _, kw = self.only_write(r)
@@ -374,7 +373,7 @@ class WritingFiles(CliTestCase):
         self.assertEqual((kind, kw), ("csv", {}))
 
     def test_csv_gzip_with_level_under_plain_csv_name(self):
-        """Пример из README: users_active.csv + gzip:6."""
+        """users_active.csv + gzip:6."""
         r = self.run_cli(BASE + ["--query", "-- @DX_COMPRESSION: gzip:6\nselect 1", "--out", "users_active.csv"])
         kind, _, kw = self.only_write(r)
         self.assertEqual(kind, "csv")

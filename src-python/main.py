@@ -214,6 +214,7 @@ def extract_dx_params(query_str, args):
         "categorize": args.categorize,
         "hash_columns": args.hash_columns,
         "cast_universal": args.cast_universal,
+        "decimal_as": args.decimal_as,
         "warnings": warnings,
     }
 
@@ -274,7 +275,27 @@ def extract_dx_params(query_str, args):
     if _flag(comments, "CAST_UNIVERSAL"):
         params["cast_universal"] = True
 
+    value = value_of("DECIMAL_AS")
+    if value:
+        mode = value.split()[0].lower()
+        if mode in DECIMAL_MODES:
+            params["decimal_as"] = mode
+        else:
+            warnings.append("Ignoring @DX_DECIMAL_AS: '%s' is not one of %s." % (value, ", ".join(DECIMAL_MODES)))
+
     return params
+
+
+DECIMAL_MODES = ("float", "decimal", "string")
+
+
+def decimal_expr(col, dtype, mode):
+    """Выражение для Decimal-колонки: float (Int64 при масштабе 0 и до 18 знаков), string (точный текст)."""
+    if mode == "string":
+        return pl.col(col).cast(pl.String)
+    if dtype.scale == 0 and dtype.precision is not None and dtype.precision <= 18:
+        return pl.col(col).cast(pl.Int64)
+    return pl.col(col).cast(pl.String).cast(pl.Float64, strict=False)
 
 
 def hash_text(value, salt=None):
@@ -537,16 +558,16 @@ def _process_query(item, idx, total, args):
             if valid_cols:
                 df = df.drop_nulls(subset=valid_cols)
 
+    decimal_mode = item.get("decimal_as") or ("float" if item.get("cast_universal") else "decimal")
+    dec_exprs = [decimal_expr(col, dtype, decimal_mode) for col, dtype in df.schema.items()
+                 if isinstance(dtype, pl.Decimal) and decimal_mode != "decimal"]
+    if dec_exprs:
+        df = df.with_columns(dec_exprs)
+
     if item.get("cast_universal"):
         uni_exprs = []
         for col, dtype in df.schema.items():
-            if isinstance(dtype, pl.Decimal):
-                # Масштаб 0 и до 18 знаков помещаются в Int64, остальное идёт в Float64 (через строку).
-                if dtype.scale == 0 and dtype.precision is not None and dtype.precision <= 18:
-                    uni_exprs.append(pl.col(col).cast(pl.Int64))
-                else:
-                    uni_exprs.append(pl.col(col).cast(pl.String).cast(pl.Float64, strict=False))
-            elif isinstance(dtype, pl.Datetime):
+            if isinstance(dtype, pl.Datetime):
                 c = pl.col(col).dt.cast_time_unit("us")
                 if dtype.time_zone is not None:
                     c = c.dt.convert_time_zone("UTC").dt.replace_time_zone(None)
@@ -650,6 +671,7 @@ def main():
     parser.add_argument("--categorize", nargs='+', help="List of columns to convert to categorical")
     parser.add_argument("--hash-columns", nargs='+', help="List of columns to hash (e.g. for PII)")
     parser.add_argument("--hash-salt", help="Secret salt for --hash-columns: values are hashed with HMAC-SHA256 instead of plain SHA-256 (or set %s)" % SALT_ENV_VAR)
+    parser.add_argument("--decimal-as", choices=DECIMAL_MODES, default=None, help="Representation of Decimal columns: float (default with --cast-universal; Int64 for scale 0 and up to 18 digits), decimal (unchanged; default without --cast-universal), string (exact text)")
     parser.add_argument("--cast-universal", action="store_true", help="Cast complex/database-specific types (Decimal, Datetime, Objects) to universal Parquet/Arrow compatible types")
     parser.add_argument("--partition-on", help="Column name to partition on (for connectorx)")
     parser.add_argument("--partitions", type=int, help="Number of partitions (requires --partition-on)")
@@ -729,7 +751,6 @@ def main():
             sys.exit(1)
         queries_to_run.append(item)
 
-    # Два запроса не должны писать в один файл
     seen_outputs = {}
     for idx, item in enumerate(queries_to_run):
         key = os.path.normcase(os.path.abspath(item["out"]))

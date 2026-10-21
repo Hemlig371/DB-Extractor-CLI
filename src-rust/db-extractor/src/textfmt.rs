@@ -1,6 +1,6 @@
-//! Запись пакетов в CSV и JSONL в том же виде, что у polars в сборке на Python: файлы обеих сборок
-//! совпадают побайтно (кроме сжатия). Стандартные писатели arrow для этого не подходят: они
-//! не отличают пустую строку от NULL, пишут числа с плавающей точкой, время и decimal иначе.
+//! Запись пакетов в CSV и JSONL в формате polars: файлы Python- и Rust-сборок совпадают побайтно.
+//! Писатели arrow не годятся: пустая строка в них неотличима от NULL, а числа с плавающей точкой,
+//! время и decimal выглядят иначе.
 
 use std::fmt::Display;
 use std::io::Write;
@@ -501,17 +501,14 @@ pub fn text_column(arr: &ArrayRef) -> Result<ArrayRef, String> {
     Ok(Arc::new(builder.finish()))
 }
 
-/// Добавляет строки пакета в `out` в формате CSV (без заголовка).
 pub fn csv_rows(batch: &RecordBatch, out: &mut Vec<u8>) -> Result<(), String> {
     write_batch(batch, Mode::Csv, out)
 }
 
-/// Добавляет строки пакета в `out` в формате JSONL.
 pub fn jsonl_rows(batch: &RecordBatch, out: &mut Vec<u8>) -> Result<(), String> {
     write_batch(batch, Mode::Json, out)
 }
 
-/// Заголовок CSV.
 pub fn csv_header(schema: &Schema) -> Vec<u8> {
     let mut out = Vec::new();
     for (i, field) in schema.fields().iter().enumerate() {

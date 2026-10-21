@@ -6,13 +6,13 @@ from helpers import dbx, ns
 extract = dbx.extract_dx_params
 
 
-class AnnotationCharacterization(unittest.TestCase):
-    """Поведение, которое должно сохраниться без изменений."""
+class AnnotationParsing(unittest.TestCase):
+    """Разбор аннотаций и значения по умолчанию."""
 
     def test_defaults_come_from_cli(self):
         p = extract("SELECT 1", ns(out="o.csv", format="csv", partition_on="id", partitions=4,
                                   fill_nulls=["a"], drop_nulls=[], utc=True, categorize=["c"],
-                                  hash_columns=["h"], cast_universal=True))
+                                  hash_columns=["h"], cast_universal=True, decimal_as="string"))
         self.assertEqual(p["out"], "o.csv")
         self.assertEqual(p["format"], "csv")
         self.assertEqual((p["partition_on"], p["partitions"]), ("id", 4))
@@ -22,6 +22,17 @@ class AnnotationCharacterization(unittest.TestCase):
         self.assertEqual(p["categorize"], ["c"])
         self.assertEqual(p["hash_columns"], ["h"])
         self.assertTrue(p["cast_universal"])
+        self.assertEqual(p["decimal_as"], "string")
+
+    def test_decimal_as_annotation(self):
+        self.assertEqual(extract("-- @DX_DECIMAL_AS: String\nSELECT 1", ns())["decimal_as"], "string")
+        self.assertEqual(extract("-- @DX_DECIMAL_AS: float\nSELECT 1", ns(decimal_as="string"))["decimal_as"], "float")
+        self.assertIsNone(extract("SELECT 1", ns())["decimal_as"])
+
+    def test_decimal_as_annotation_with_unknown_value_is_ignored(self):
+        p = extract("-- @DX_DECIMAL_AS: number\nSELECT 1", ns(decimal_as="float"))
+        self.assertEqual(p["decimal_as"], "float")
+        self.assertTrue(any("DECIMAL_AS" in w for w in p["warnings"]))
 
     def test_readme_example_one(self):
         sql = (
@@ -91,8 +102,8 @@ class AnnotationCharacterization(unittest.TestCase):
         self.assertEqual(extract(second, ns())["out"], "b.parquet")
 
 
-class AnnotationFixes(unittest.TestCase):
-    """Дефекты 4, 16, 19: захват значения, нормализация, привязка к комментариям."""
+class AnnotationValues(unittest.TestCase):
+    """Захват значения, нормализация, привязка аннотаций к комментариям."""
 
     def test_bare_fill_nulls_means_all_columns(self):
         p = extract("-- @DX_FILL_NULLS\nSELECT a, b FROM t", ns())

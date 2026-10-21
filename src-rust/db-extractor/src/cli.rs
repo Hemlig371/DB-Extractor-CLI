@@ -66,6 +66,11 @@ pub struct Cli {
     #[arg(long)]
     pub cast_universal: bool,
 
+    /// Representation of Decimal columns: float (default with --cast-universal; Int64 for scale 0 and up to 18 digits),
+    /// decimal (unchanged; default without --cast-universal), string (exact text)
+    #[arg(long, value_parser = ["float", "decimal", "string"])]
+    pub decimal_as: Option<String>,
+
     /// Column name to partition on (for connectorx)
     #[arg(long)]
     pub partition_on: Option<String>,
@@ -118,6 +123,7 @@ impl Cli {
             categorize: self.categorize.clone().filter(|c| !c.is_empty()),
             hash_columns: self.hash_columns.clone().filter(|c| !c.is_empty()),
             cast_universal: self.cast_universal,
+            decimal_as: self.decimal_as.clone(),
         }
     }
 }
@@ -168,6 +174,15 @@ mod tests {
         let c = parse(&["--query", "q", "--hash-columns", "email", "phone", "--cast-universal"]).unwrap();
         assert_eq!(c.hash_columns, Some(vec!["email".to_string(), "phone".to_string()]));
         assert!(c.cast_universal);
+    }
+
+    #[test]
+    fn decimal_as_accepts_known_values_only() {
+        let c = parse(&["--query", "q", "--decimal-as", "string"]).unwrap();
+        assert_eq!(c.decimal_as.as_deref(), Some("string"));
+        assert_eq!(c.base_options().decimal_as.as_deref(), Some("string"));
+        assert!(parse(&["--query", "q", "--decimal-as", "number"]).is_err());
+        assert_eq!(parse(&["--query", "q"]).unwrap().decimal_as, None);
     }
 
     #[test]

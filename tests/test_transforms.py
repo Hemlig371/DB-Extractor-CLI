@@ -34,7 +34,6 @@ class TransformTests(CliTestCase):
     def read(self, r, name="out.parquet"):
         return pl.read_parquet(r.path(name))
 
-    # --- hash -----------------------------------------------------------
     def test_hash_matches_sha256_and_keeps_nulls(self):
         df = pl.DataFrame({"email": ["a@x.com", None, "b@x.com"], "n": [1, 2, 3]})
         out = self.read(self.extract(df, "--hash-columns", "email"))
@@ -60,7 +59,6 @@ class TransformTests(CliTestCase):
         self.assertEqual(out["email"].to_list(), [expected, None])
         self.assertNotEqual(expected, sha("a@x.com"))
 
-    # --- fill / drop nulls ---------------------------------------------
     def frame_with_nulls(self):
         return pl.DataFrame({
             "s": ["a", None], "i": [1, None], "f": [1.5, None],
@@ -100,7 +98,6 @@ class TransformTests(CliTestCase):
         df = pl.DataFrame({"a": [1, None], "b": [1, 2]})
         self.assertEqual(self.read(self.extract(df, sql="-- @DX_DROP_NULLS\nselect 1")).height, 1)
 
-    # --- utc / categorize ---------------------------------------------
     def test_utc_labels_naive_and_converts_aware(self):
         naive = dt.datetime(2024, 1, 1, 12, 0)
         aware = dt.datetime(2024, 1, 1, 12, 0, tzinfo=dt.timezone(dt.timedelta(hours=3)))
@@ -117,7 +114,6 @@ class TransformTests(CliTestCase):
         out = self.read(self.extract(df, "--categorize", "status"))
         self.assertEqual(out["status"].cast(pl.String).to_list(), ["a", "b", "a"])
 
-    # --- cast-universal -----------------------------------------------
     def test_cast_universal_decimal_becomes_float64(self):
         df = pl.DataFrame({"id": [1]}).with_columns(decimal_series("amt", ["10.2500000000"]))
         out = self.read(self.extract(df, "--cast-universal"))
@@ -135,7 +131,7 @@ class TransformTests(CliTestCase):
         self.assertEqual(out["a"].to_list()[0], dt.datetime(2024, 1, 1, 9, 0))
 
     def test_cast_universal_turns_categorical_back_into_strings(self):
-        """Сохраняемое поведение: --cast-universal побеждает --categorize."""
+        """--cast-universal побеждает --categorize."""
         df = pl.DataFrame({"status": ["a", "b"]})
         out = self.read(self.extract(df, "--categorize", "status", "--cast-universal"))
         self.assertEqual(out.schema["status"], pl.String)
@@ -145,6 +141,49 @@ class TransformTests(CliTestCase):
         out = self.read(self.extract(df, "--cast-universal"))
         self.assertEqual(out.schema["n"], pl.Int64)
         self.assertEqual(out["n"].to_list(), [42, None])
+
+    def test_decimal_default_is_unchanged_without_cast_universal(self):
+        df = pl.DataFrame({"id": [1]}).with_columns(decimal_series("amt", ["10.2500000000"]))
+        out = self.read(self.extract(df))
+        self.assertEqual(out.schema["amt"], pl.Decimal(38, 10))
+
+    def test_decimal_as_float_without_cast_universal(self):
+        df = pl.DataFrame({"id": [1]}).with_columns(decimal_series("amt", ["10.2500000000", None]))
+        out = self.read(self.extract(df, "--decimal-as", "float"))
+        self.assertEqual(out.schema["amt"], pl.Float64)
+        self.assertEqual(out["amt"].to_list(), [10.25, None])
+
+    def test_decimal_as_string_keeps_exact_scale(self):
+        df = pl.DataFrame({"id": [1, 2]}).with_columns(
+            decimal_series("amt", ["12345678901234567890.1234567891", None]))
+        out = self.read(self.extract(df, "--decimal-as", "string"))
+        self.assertEqual(out.schema["amt"], pl.String)
+        self.assertEqual(out["amt"].to_list(), ["12345678901234567890.1234567891", None])
+
+    def test_decimal_as_decimal_overrides_cast_universal(self):
+        df = pl.DataFrame({"id": [1]}).with_columns(decimal_series("amt", ["10.2500000000"]))
+        out = self.read(self.extract(df, "--cast-universal", "--decimal-as", "decimal"))
+        self.assertEqual(out.schema["amt"], pl.Decimal(38, 10))
+
+    def test_decimal_as_string_with_cast_universal(self):
+        df = pl.DataFrame({"id": [1]}).with_columns(decimal_series("amt", ["10.2500000000"]))
+        out = self.read(self.extract(df, "--cast-universal", "--decimal-as", "string"))
+        self.assertEqual(out["amt"].to_list(), ["10.2500000000"])
+
+    def test_decimal_as_float_scale_zero_becomes_int64(self):
+        df = pl.DataFrame({"n": pl.Series("n", [Decimal("42"), None], dtype=pl.Decimal(10, 0))})
+        out = self.read(self.extract(df, "--decimal-as", "float"))
+        self.assertEqual(out.schema["n"], pl.Int64)
+
+    def test_decimal_as_annotation_overrides_cli(self):
+        df = pl.DataFrame({"id": [1]}).with_columns(decimal_series("amt", ["1.5000000000"]))
+        out = self.read(self.extract(df, "--decimal-as", "float", sql="-- @DX_DECIMAL_AS: string\nselect 1"))
+        self.assertEqual(out["amt"].to_list(), ["1.5000000000"])
+
+    def test_decimal_as_rejects_unknown_value(self):
+        r = self.run_cli(BASE + ["--query", "select 1", "--out", "o.parquet", "--decimal-as", "number"],
+                         read=lambda **kw: pl.DataFrame({"a": [1]}))
+        self.assertEqual(r.code, 2)
 
     def test_cast_universal_nested_types_become_json_strings(self):
         df = pl.DataFrame({
@@ -156,7 +195,6 @@ class TransformTests(CliTestCase):
         self.assertEqual(out["l"].to_list(), ["[1,2]", None, "[]"])
         self.assertEqual(out["s"].to_list(), ['{"a":1,"b":"x"}', None, '{"a":null,"b":"y"}'])
 
-    # --- categorize в форматах, отличных от Parquet -----------------------
     def test_categorize_is_applied_only_to_parquet(self):
         df = pl.DataFrame({"status": ["a", "b", "a"]})
         r = self.run_cli(BASE + ["--query", "select 1", "--out", "o.arrow", "--categorize", "status"],
@@ -164,7 +202,6 @@ class TransformTests(CliTestCase):
         self.assertEqual(r.code, 0, msg=r.out + r.err + r.log)
         self.assertEqual(pl.read_ipc(r.path("o.arrow")).schema["status"], pl.String)
 
-    # --- запись ---------------------------------------------------------
     def test_csv_gzip_under_plain_csv_name(self):
         df = pl.DataFrame({"a": [1, 2], "b": ["x", "y"]})
         r = self.extract(df, "--compression", "gzip:6", out="plain.csv")

@@ -30,10 +30,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 PY_MAIN = os.path.join(ROOT, "src-python", "main.py")
 
 
-# --------------------------------------------------------------------------
-# Тестовая база
-# --------------------------------------------------------------------------
-
 def make_db(path):
     con = sqlite3.connect(path)
     con.execute(
@@ -52,10 +48,6 @@ def make_db(path):
     con.commit()
     con.close()
 
-
-# --------------------------------------------------------------------------
-# Сценарии
-# --------------------------------------------------------------------------
 
 SELECT_ALL = "select id, name, email, score, active, born, created, payload, qty from people order by id"
 SELECT_BASIC = "select id, name, email, score, qty from people order by id"
@@ -105,6 +97,9 @@ SCENARIOS = [
        sql="select id, name, score, created, qty from people order by id"),
     sc("cast-universal jsonl", ["--cast-universal"], ["o.jsonl"], "jsonl",
        sql="select id, name, score, created, qty from people order by id"),
+    sc("decimal-as string", ["--decimal-as", "string"], ["o.parquet"], "parquet"),
+    sc("decimal-as float with annotation override", [], ["o.parquet"], "parquet",
+       sql="-- @DX_DECIMAL_AS: float\nselect id, score from people order by id"),
     sc("categorize", ["--categorize", "name"], ["o.parquet"], "parquet"),
     sc("empty result parquet", [], ["o.parquet"], "parquet", sql="select id, name from people where 1 = 0"),
     sc("empty result csv", [], ["o.csv"], "csv", sql="select id, name from people where 1 = 0"),
@@ -123,10 +118,6 @@ if sys.platform != "win32":
     SCENARIOS.append(
         sc("partitions", ["--partition-on", "id", "--partitions", "2"], ["o.parquet"], "parquet", sort=True))
 
-
-# --------------------------------------------------------------------------
-# Запуск
-# --------------------------------------------------------------------------
 
 def run_impl(cmd_prefix, scenario, conn, workdir):
     os.makedirs(workdir, exist_ok=True)
@@ -157,10 +148,6 @@ def log_summary(log):
         result.append((m.group(1), int(rows.group(1)) if rows else None))
     return result
 
-
-# --------------------------------------------------------------------------
-# Сравнение файлов
-# --------------------------------------------------------------------------
 
 def family(dtype):
     if dtype in (pl.Boolean,):
@@ -320,8 +307,8 @@ def check_expected(path, kind, expected):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--rust", required=True, help="path to the Rust db-extractor binary")
-    parser.add_argument("--suite", choices=["sqlite", "postgres", "oracle"], default="sqlite")
-    parser.add_argument("--conn", help="connection URI for the postgres and oracle suites (tables from *.sql)")
+    parser.add_argument("--suite", choices=["sqlite", "postgres", "oracle", "clickhouse"], default="sqlite")
+    parser.add_argument("--conn", help="connection URI for the postgres, oracle and clickhouse suites (tables from *.sql)")
     parser.add_argument("--only", help="substring of the scenario name")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     opts = parser.parse_args()

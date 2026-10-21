@@ -1,6 +1,6 @@
-"""Сценарии сравнения Python и Rust на настоящих СУБД (PostgreSQL, Oracle).
+"""Сценарии сравнения Python и Rust на настоящих СУБД (PostgreSQL, Oracle, ClickHouse).
 
-Таблицы создают postgres.sql и oracle.sql. Сценарий с rust_only запускается только в Rust-сборке и
+Таблицы создают postgres.sql, oracle.sql и clickhouse.sql. Сценарий с rust_only запускается только в Rust-сборке и
 сверяется с ожидаемым текстом: connectorx из PyPI (Python-версия) эти типы Oracle не читает.
 """
 
@@ -9,8 +9,6 @@ def sc(name, args, outs, kind, sql, exit_code=0, sort=False, query_file=None, ru
     return dict(name=name, args=args, outs=outs, kind=kind, sql=sql, exit_code=exit_code, sort=sort,
                 query_file=query_file, rust_only=rust_only, expect=expect)
 
-
-# ---------------------------------------------------------------- PostgreSQL
 
 PG_NUMBERS = "select id, i2, i8, r4, r8, n12_3, n10_0 from parity_types order by id"
 PG_TEXT = "select id, txt, vc, ch, b from parity_types order by id"
@@ -31,6 +29,16 @@ POSTGRES = [
     sc("pg all types jsonl", [], ["o.jsonl"], "jsonl", PG_ALL),
     sc("pg utc jsonl", ["--utc"], ["o.jsonl"], "jsonl", PG_TIME),
     sc("pg all types cast-universal jsonl", ["--cast-universal"], ["o.jsonl"], "jsonl", PG_ALL),
+    sc("pg decimal-as float parquet", ["--decimal-as", "float"], ["o.parquet"], "parquet", PG_NUMBERS),
+    sc("pg decimal-as string parquet", ["--decimal-as", "string"], ["o.parquet"], "parquet", PG_NUMBERS),
+    sc("pg decimal-as string csv", ["--decimal-as", "string"], ["o.csv"], "csv", PG_NUMBERS),
+    sc("pg decimal-as string jsonl", ["--decimal-as", "string"], ["o.jsonl"], "jsonl", PG_NUMBERS),
+    sc("pg decimal-as decimal with cast-universal", ["--cast-universal", "--decimal-as", "decimal"],
+       ["o.parquet"], "parquet", PG_NUMBERS),
+    sc("pg decimal-as string with cast-universal", ["--cast-universal", "--decimal-as", "string"],
+       ["o.jsonl"], "jsonl", PG_ALL),
+    sc("pg hash decimal column with decimal-as string", ["--hash-columns", "n12_3", "--decimal-as", "string"],
+       ["o.parquet"], "parquet", PG_NUMBERS),
     sc("pg text parquet", [], ["o.parquet"], "parquet", PG_TEXT),
     sc("pg text csv", [], ["o.csv"], "csv", PG_TEXT),
     sc("pg date and time parquet", [], ["o.parquet"], "parquet", PG_TIME),
@@ -64,8 +72,6 @@ POSTGRES = [
        )),
 ]
 
-# -------------------------------------------------------------------- Oracle
-
 OR_NUMBERS = "select id, n_int, n_dec, n_any, bd, bf from parity_types order by id"
 OR_TEXT = "select id, vc, nvc, ch, cl from parity_types order by id"
 OR_TIME = "select id, d, ts from parity_types order by id"
@@ -84,6 +90,10 @@ ORACLE = [
     sc("oracle blob csv", [], ["o.csv"], "csv", OR_BINARY),
     sc("oracle blob jsonl", [], ["o.jsonl"], "jsonl", OR_BINARY),
     sc("oracle all cast-universal jsonl", ["--cast-universal"], ["o.jsonl"], "jsonl", OR_ALL),
+    sc("oracle decimal-as float parquet", ["--decimal-as", "float"], ["o.parquet"], "parquet", OR_NUMBERS),
+    sc("oracle decimal-as string parquet", ["--decimal-as", "string"], ["o.parquet"], "parquet", OR_NUMBERS),
+    sc("oracle decimal-as string csv", ["--decimal-as", "string"], ["o.csv"], "csv", OR_NUMBERS),
+    sc("oracle decimal-as string jsonl", ["--decimal-as", "string"], ["o.jsonl"], "jsonl", OR_NUMBERS),
     sc("oracle text parquet", [], ["o.parquet"], "parquet", OR_TEXT),
     sc("oracle text csv", [], ["o.csv"], "csv", OR_TEXT),
     sc("oracle date and time parquet", [], ["o.parquet"], "parquet", OR_TIME),
@@ -132,4 +142,55 @@ ORACLE = [
        ]}),
 ]
 
-SUITES = {"postgres": POSTGRES, "oracle": ORACLE}
+CH_NUMBERS = "select id, i8c, u8c, i64, u64, f32, f64, d12_3, d10_0 from parity_types order by id"
+CH_TEXT = "select id, s, fs, e, u, ip4, b from parity_types order by id"
+CH_TIME = "select id, dt, dt32, ts, ts3, ts6 from parity_types order by id"
+CH_NESTED = "select id, arr, sarr from parity_types order by id"
+CH_ALL = ("select id, i8c, u8c, i64, u64, f32, f64, d12_3, d10_0, s, fs, b, dt, dt32, ts, ts3, ts6, e, u, ip4, arr, sarr "
+          "from parity_types order by id")
+CH_BIG = "select id, h, k, f, s from parity_big order by id"
+
+CLICKHOUSE = [
+    sc("ch numbers parquet", [], ["o.parquet"], "parquet", CH_NUMBERS),
+    sc("ch numbers csv", [], ["o.csv"], "csv", CH_NUMBERS),
+    sc("ch numbers jsonl", [], ["o.jsonl"], "jsonl", CH_NUMBERS),
+    sc("ch text parquet", [], ["o.parquet"], "parquet", CH_TEXT),
+    sc("ch text csv", [], ["o.csv"], "csv", CH_TEXT),
+    sc("ch text jsonl", [], ["o.jsonl"], "jsonl", CH_TEXT),
+    sc("ch date and time parquet", [], ["o.parquet"], "parquet", CH_TIME),
+    sc("ch date and time csv", [], ["o.csv"], "csv", CH_TIME),
+    sc("ch date and time jsonl", [], ["o.jsonl"], "jsonl", CH_TIME),
+    sc("ch arrays parquet", [], ["o.parquet"], "parquet", CH_NESTED),
+    sc("ch arrays cast-universal jsonl", ["--cast-universal"], ["o.jsonl"], "jsonl", CH_NESTED),
+    sc("ch all types parquet", [], ["o.parquet"], "parquet", CH_ALL),
+    sc("ch all types jsonl", [], ["o.jsonl"], "jsonl", CH_ALL),
+    sc("ch all types cast-universal parquet", ["--cast-universal"], ["o.parquet"], "parquet", CH_ALL),
+    sc("ch all types cast-universal csv", ["--cast-universal"], ["o.csv"], "csv", CH_ALL),
+    sc("ch all types cast-universal jsonl", ["--cast-universal"], ["o.jsonl"], "jsonl", CH_ALL),
+    sc("ch decimal-as float parquet", ["--decimal-as", "float"], ["o.parquet"], "parquet", CH_NUMBERS),
+    sc("ch decimal-as string parquet", ["--decimal-as", "string"], ["o.parquet"], "parquet", CH_NUMBERS),
+    sc("ch decimal-as string csv", ["--decimal-as", "string"], ["o.csv"], "csv", CH_NUMBERS),
+    sc("ch decimal-as string jsonl", ["--decimal-as", "string"], ["o.jsonl"], "jsonl", CH_NUMBERS),
+    sc("ch decimal-as decimal with cast-universal", ["--cast-universal", "--decimal-as", "decimal"],
+       ["o.parquet"], "parquet", CH_NUMBERS),
+    sc("ch utc parquet", ["--utc"], ["o.parquet"], "parquet", CH_TIME),
+    sc("ch utc csv", ["--utc"], ["o.csv"], "csv", CH_TIME),
+    sc("ch hash text and int", ["--hash-columns", "s", "id"], ["o.parquet"], "parquet", CH_TEXT),
+    sc("ch hash with salt", ["--hash-columns", "s", "--hash-salt", "s3cret"], ["o.csv"], "csv", CH_TEXT),
+    sc("ch fill-nulls", ["--fill-nulls"], ["o.parquet"], "parquet", CH_TEXT),
+    sc("ch drop-nulls", ["--drop-nulls", "s"], ["o.csv"], "csv", CH_TEXT),
+    sc("ch categorize", ["--categorize", "s"], ["o.parquet"], "parquet", CH_TEXT),
+    sc("ch big parquet", [], ["o.parquet"], "parquet", CH_BIG),
+    sc("ch big csv", [], ["o.csv"], "csv", CH_BIG),
+    sc("ch big partitions", ["--partition-on", "id", "--partitions", "3"], ["o.parquet"], "parquet", CH_BIG,
+       sort=True),
+    sc("ch empty result", [], ["o.csv"], "csv", "select id, s from parity_types where 1 = 0"),
+    sc("ch broken sql fails", [], [], "parquet", "select * from no_such_table", exit_code=1),
+    sc("ch annotations via query file", [], ["a.parquet", "b.csv"], None, None,
+       query_file=(
+           "-- @DX_OUT: a.parquet\n-- @DX_HASH_COLUMNS: s\n-- @DX_FILL_NULLS\n" + CH_TEXT + ";\n"
+           "-- @DX_OUT: b.csv\n-- @DX_DECIMAL_AS: string\n" + CH_NUMBERS + ";\n"
+       )),
+]
+
+SUITES = {"postgres": POSTGRES, "oracle": ORACLE, "clickhouse": CLICKHOUSE}

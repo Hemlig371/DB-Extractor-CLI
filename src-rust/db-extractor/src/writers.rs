@@ -15,7 +15,6 @@ use parquet::file::properties::WriterProperties;
 
 use crate::textfmt::{self, Mode};
 
-/// Строк в одной группе Parquet.
 const ROW_GROUP_ROWS: usize = 262_144;
 const DEFAULT_GZIP_LEVEL: u32 = 6;
 const DEFAULT_ZSTD_LEVEL: i32 = 3;
@@ -147,7 +146,6 @@ impl Sink for IpcSink {
     }
 }
 
-/// Открывает приёмник данных для файла `path`.
 pub fn open_sink(
     format: &str,
     path: &Path,
@@ -251,7 +249,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (schema, batch) = sample();
 
-        let gz = dir.path().join("a.csv"); // имя не обязано заканчиваться на .gz
+        let gz = dir.path().join("a.csv");
         let mut sink = open_sink("csv", &gz, &schema, &comp(Some("gzip"), Some(6))).unwrap();
         sink.write(&batch).unwrap();
         sink.finish().unwrap();

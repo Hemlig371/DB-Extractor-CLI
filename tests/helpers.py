@@ -41,7 +41,7 @@ def ns(**kwargs):
     defaults = dict(
         out=None, format=None, compression=None, partition_on=None, partitions=None,
         fill_nulls=None, drop_nulls=None, utc=False, categorize=None, hash_columns=None,
-        cast_universal=False, quiet=False,
+        cast_universal=False, decimal_as=None, quiet=False,
     )
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)

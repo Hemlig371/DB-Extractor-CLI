@@ -27,8 +27,31 @@ pub struct PlanInput<'a> {
     pub fill_nulls: Option<&'a [String]>,
     pub drop_nulls: Option<&'a [String]>,
     pub cast_universal: bool,
+    /// `float`, `decimal`, `string`; None: `float` при `cast_universal`, иначе `decimal`.
+    pub decimal_as: Option<&'a str>,
     /// Категоризация имеет смысл только для Parquet (словарное кодирование).
     pub parquet_output: bool,
+}
+
+/// Представление Decimal-колонок в результате.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DecimalMode {
+    Float,
+    Decimal,
+    String,
+}
+
+impl DecimalMode {
+    fn resolve(requested: Option<&str>, cast_universal: bool) -> Result<DecimalMode, String> {
+        match requested {
+            Some("float") => Ok(DecimalMode::Float),
+            Some("decimal") => Ok(DecimalMode::Decimal),
+            Some("string") => Ok(DecimalMode::String),
+            Some(other) => Err(format!("Unknown --decimal-as value '{}'.", other)),
+            None if cast_universal => Ok(DecimalMode::Float),
+            None => Ok(DecimalMode::Decimal),
+        }
+    }
 }
 
 pub struct Plan {
@@ -39,9 +62,9 @@ pub struct Plan {
     /// None: не удалять строки; Some: индексы колонок, в которых NULL недопустим.
     drop: Option<Vec<usize>>,
     cast_universal: bool,
+    decimal: DecimalMode,
     categorize: Vec<usize>,
     names: Vec<String>,
-    /// Схема результата после преобразований.
     pub out_schema: SchemaRef,
 }
 
@@ -50,7 +73,6 @@ fn indices_of(names: &[String], found: &[String]) -> Vec<usize> {
 }
 
 impl Plan {
-    /// Строит план по схеме. Возвращает план и предупреждения.
     /// Отсутствующая колонка в `hash_columns` это ошибка: иначе данные ушли бы без маскирования.
     pub fn build(schema: &SchemaRef, input: &PlanInput) -> Result<(Plan, Vec<String>), String> {
         let names: Vec<String> = schema.fields().iter().map(|f| f.name().clone()).collect();
@@ -119,12 +141,12 @@ impl Plan {
             fill,
             drop,
             cast_universal: input.cast_universal,
+            decimal: DecimalMode::resolve(input.decimal_as, input.cast_universal)?,
             categorize,
             names,
             out_schema: schema.clone(),
         };
 
-        // Схема результата: применяем план к пустому пакету.
         let empty = RecordBatch::new_empty(schema.clone());
         let cols = plan.apply_columns(&empty)?;
         plan.out_schema = plan.schema_of(&cols);
@@ -162,9 +184,22 @@ impl Plan {
             cols = drop_null_rows(cols, idx)?;
         }
 
+        if self.decimal != DecimalMode::Decimal {
+            for c in cols.iter_mut() {
+                if is_decimal(c.data_type()) {
+                    *c = match self.decimal {
+                        DecimalMode::String => decimal_to_string(c)?,
+                        _ => decimal_to_float(c)?,
+                    };
+                }
+            }
+        }
+
         if self.cast_universal {
             for c in cols.iter_mut() {
-                *c = universal(c)?;
+                if !is_decimal(c.data_type()) {
+                    *c = universal(c)?;
+                }
             }
         }
 
@@ -174,7 +209,6 @@ impl Plan {
         Ok(cols)
     }
 
-    /// Применяет план к пакету строк.
     pub fn apply(&self, batch: &RecordBatch) -> Result<RecordBatch, String> {
         let cols = self.apply_columns(batch)?;
         RecordBatch::try_new(self.out_schema.clone(), cols).map_err(|e| e.to_string())
@@ -377,6 +411,36 @@ fn timestamp_to_naive_micros(arr: &ArrayRef) -> Result<ArrayRef, String> {
     Ok(Arc::new(out))
 }
 
+fn is_decimal(t: &DataType) -> bool {
+    matches!(
+        t,
+        DataType::Decimal32(_, _) | DataType::Decimal64(_, _) | DataType::Decimal128(_, _) | DataType::Decimal256(_, _)
+    )
+}
+
+/// Масштаб 0 и до 18 знаков -> Int64, остальное -> Float64.
+fn decimal_to_float(arr: &ArrayRef) -> Result<ArrayRef, String> {
+    use DataType::*;
+    match arr.data_type() {
+        Decimal32(p, s) | Decimal64(p, s) | Decimal128(p, s) | Decimal256(p, s) if *s == 0 && *p <= 18 => {
+            cast(arr.as_ref(), &Int64).map_err(|e| e.to_string())
+        }
+        _ => {
+            // Через строку: так значение округляется до ближайшего double ровно один раз.
+            let text = cast(arr.as_ref(), &Utf8).map_err(|e| e.to_string())?;
+            cast(text.as_ref(), &Float64).map_err(|e| e.to_string())
+        }
+    }
+}
+
+/// Точный текст значения с полным масштабом.
+fn decimal_to_string(arr: &ArrayRef) -> Result<ArrayRef, String> {
+    match crate::textfmt::text_column(arr) {
+        Ok(text) => Ok(text),
+        Err(_) => cast(arr.as_ref(), &DataType::Utf8).map_err(|e| e.to_string()),
+    }
+}
+
 /// Приводит колонку к типам, понятным любому потребителю Parquet/Arrow:
 /// - Decimal -> Float64 (при масштабе 0 и точности до 18 знаков -> Int64);
 /// - Timestamp -> микросекунды в UTC без часового пояса;
@@ -390,15 +454,7 @@ pub fn universal(arr: &ArrayRef) -> Result<ArrayRef, String> {
         | Utf8 | LargeUtf8 | Utf8View | Binary | LargeBinary | BinaryView | FixedSizeBinary(_) | Date32 | Date64
         | Time32(_) | Time64(_) | Null => Ok(arr.clone()),
 
-        Decimal32(p, s) | Decimal64(p, s) | Decimal128(p, s) | Decimal256(p, s) => {
-            if *s == 0 && *p <= 18 {
-                cast(arr.as_ref(), &Int64).map_err(|e| e.to_string())
-            } else {
-                // Через строку: так значение округляется до ближайшего double ровно один раз.
-                let text = cast(arr.as_ref(), &Utf8).map_err(|e| e.to_string())?;
-                cast(text.as_ref(), &Float64).map_err(|e| e.to_string())
-            }
-        }
+        Decimal32(_, _) | Decimal64(_, _) | Decimal128(_, _) | Decimal256(_, _) => decimal_to_float(arr),
 
         Timestamp(_, _) => timestamp_to_naive_micros(arr),
 
@@ -462,6 +518,7 @@ mod tests {
             fill_nulls: None,
             drop_nulls: None,
             cast_universal: false,
+            decimal_as: None,
             parquet_output: true,
         }
     }
@@ -597,6 +654,62 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!(universal(&d).unwrap().data_type(), &DataType::Int64);
+    }
+
+    fn dec_batch() -> RecordBatch {
+        let d: ArrayRef = Arc::new(
+            Decimal128Array::from(vec![Some(102_500_000_000i128), None])
+                .with_precision_and_scale(38, 10)
+                .unwrap(),
+        );
+        batch(vec![("d", d)])
+    }
+
+    fn dec_out(decimal_as: Option<&str>, cast_universal: bool) -> ArrayRef {
+        let b = dec_batch();
+        let mut i = input();
+        i.decimal_as = decimal_as;
+        i.cast_universal = cast_universal;
+        let (plan, _) = Plan::build(&b.schema(), &i).unwrap();
+        plan.apply(&b).unwrap().column(0).clone()
+    }
+
+    #[test]
+    fn decimal_default_is_unchanged_without_cast_universal() {
+        assert_eq!(dec_out(None, false).data_type(), &DataType::Decimal128(38, 10));
+        assert_eq!(dec_out(None, true).data_type(), &DataType::Float64);
+    }
+
+    #[test]
+    fn decimal_as_float_works_without_cast_universal() {
+        let f = dec_out(Some("float"), false);
+        assert_eq!(f.data_type(), &DataType::Float64);
+        assert_eq!(f.as_primitive::<arrow::datatypes::Float64Type>().value(0), 10.25);
+        assert!(f.is_null(1));
+    }
+
+    #[test]
+    fn decimal_as_string_keeps_full_scale() {
+        for cast_universal in [false, true] {
+            let t = dec_out(Some("string"), cast_universal);
+            assert_eq!(strings(&t), vec![Some("10.2500000000".to_string()), None]);
+        }
+    }
+
+    #[test]
+    fn decimal_as_decimal_overrides_cast_universal() {
+        assert_eq!(
+            dec_out(Some("decimal"), true).data_type(),
+            &DataType::Decimal128(38, 10)
+        );
+    }
+
+    #[test]
+    fn decimal_as_unknown_value_is_an_error() {
+        let b = dec_batch();
+        let mut i = input();
+        i.decimal_as = Some("number");
+        assert!(Plan::build(&b.schema(), &i).is_err());
     }
 
     #[test]

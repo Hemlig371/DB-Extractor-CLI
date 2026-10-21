@@ -139,6 +139,7 @@ fn run_query(item: &QueryParams, idx: usize, total: usize, ctx: &Ctx) -> Result<
             fill_nulls: item.fill_nulls.as_deref(),
             drop_nulls: item.drop_nulls.as_deref(),
             cast_universal: item.cast_universal,
+            decimal_as: item.decimal_as.as_deref(),
             parquet_output: format == "parquet",
         },
     )?;
