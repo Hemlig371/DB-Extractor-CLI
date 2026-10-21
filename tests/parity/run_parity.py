@@ -6,8 +6,9 @@
 
 Для каждого сценария обе версии получают одинаковые аргументы. Сравниваются код возврата,
 статус и число строк в export_log.txt, а также содержимое выходных файлов: имена колонок,
-значения и «семейство» типа (целое, дробное, строка, дата, ...). Результат: таблица PASS/FAIL
-и подробности расхождений. Код возврата 1, если есть расхождения.
+значения и «семейство» типа (целое, дробное, строка, дата, ...). CSV и JSONL сравниваются побайтно
+(gzip-CSV после распаковки). Результат: таблица PASS/FAIL и подробности расхождений. Код возврата 1,
+если есть расхождения.
 """
 import argparse
 import csv
@@ -73,6 +74,20 @@ SCENARIOS = [
     sc("csv gzip level (README example)", ["--compression", "gzip:6"], ["o.csv"], "csv", sql=SELECT_BASIC),
     sc("csv zstd by extension", [], ["o.csv.zst"], "csv", sql=SELECT_BASIC),
     sc("jsonl", [], ["o.jsonl"], "jsonl", sql=SELECT_BASIC),
+    sc("csv with binary, dates and nulls", [], ["o.csv"], "csv"),
+    sc("jsonl with binary, dates and nulls", [], ["o.jsonl"], "jsonl"),
+    sc("csv gzip with binary", ["--compression", "gzip"], ["o.csv"], "csv"),
+    sc("csv empty string is not null", [], ["o.csv"], "csv",
+       sql="select id, name, '' as empty, 'a,b' as comma, 'say \"hi\"' as quote from people order by id"),
+    sc("jsonl empty string is not null", [], ["o.jsonl"], "jsonl",
+       sql="select id, name, '' as empty, 'a,b' as comma, 'say \"hi\"' as quote from people order by id"),
+    sc("csv special floats", [], ["o.csv"], "csv",
+       sql="select id, score, score * 1e300 as big, score / 3.0 as third from people order by id"),
+    sc("jsonl special floats", [], ["o.jsonl"], "jsonl",
+       sql="select id, score, score * 1e300 as big, score / 3.0 as third from people order by id"),
+    sc("cast-universal csv with binary", ["--cast-universal"], ["o.csv"], "csv"),
+    sc("cast-universal jsonl with binary", ["--cast-universal"], ["o.jsonl"], "jsonl"),
+    sc("hash binary column csv", ["--hash-columns", "payload"], ["o.csv"], "csv"),
     sc("arrow", [], ["o.arrow"], "arrow", sql=SELECT_BASIC),
     sc("hash email", ["--hash-columns", "email"], ["o.parquet"], "parquet"),
     sc("hash email, case-insensitive name", ["--hash-columns", "EMAIL"], ["o.parquet"], "parquet"),
@@ -204,10 +219,38 @@ def table(df, sort):
     return rows
 
 
+def is_zstd(path):
+    with open(path, "rb") as f:
+        return f.read(4) == b"\x28\xb5\x2f\xfd"
+
+
+def raw_differences(py_path, rs_path, limit=4):
+    """Построчное побайтное сравнение текстовых файлов; пустой список, если файлы совпадают."""
+    with open(py_path, "rb") as f:
+        a = f.read()
+    with open(rs_path, "rb") as f:
+        b = f.read()
+    if a == b:
+        return []
+    la, lb = a.split(b"\n"), b.split(b"\n")
+    problems = []
+    if len(la) != len(lb):
+        problems.append(f"line counts differ: python={len(la) - 1} rust={len(lb) - 1}")
+    for i, (x, y) in enumerate(zip(la, lb)):
+        if x != y:
+            problems.append(f"line {i}: python={x.decode('utf-8', 'replace')!r} rust={y.decode('utf-8', 'replace')!r}")
+            if len(problems) > limit:
+                problems.append("...")
+                break
+    return problems
+
+
 def compare_files(py_path, rs_path, kind, sort):
     problems = []
     if not os.path.exists(py_path) or not os.path.exists(rs_path):
         return [f"missing file: python={os.path.exists(py_path)} rust={os.path.exists(rs_path)}"]
+    if kind in ("csv", "jsonl") and not sort and not is_zstd(py_path) and not is_zstd(rs_path):
+        return raw_differences(py_path, rs_path)
     try:
         a, b = read_file(py_path, kind), read_file(rs_path, kind)
     except Exception as e:  # noqa: BLE001

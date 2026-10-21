@@ -227,7 +227,10 @@ pub fn hash_array(arr: &ArrayRef, salt: Option<&[u8]>) -> Result<ArrayRef, Strin
             }
         }
         _ => {
-            let text = cast(arr.as_ref(), &DataType::Utf8).map_err(|e| e.to_string())?;
+            let text = match crate::textfmt::text_column(arr) {
+                Ok(text) => text,
+                Err(_) => cast(arr.as_ref(), &DataType::Utf8).map_err(|e| e.to_string())?,
+            };
             for v in text.as_string::<i32>().iter() {
                 push_hash(&mut b, v.map(|s| s.as_bytes()), salt);
             }
@@ -331,7 +334,7 @@ fn to_display_strings(arr: &ArrayRef) -> Result<ArrayRef, String> {
 }
 
 /// Вложенные значения (списки, структуры, словари) как JSON-строки.
-fn to_json_strings(arr: &ArrayRef) -> Result<ArrayRef, String> {
+pub(crate) fn to_json_strings(arr: &ArrayRef) -> Result<ArrayRef, String> {
     let schema = Arc::new(Schema::new(vec![Field::new("c", arr.data_type().clone(), true)]));
     let batch = RecordBatch::try_new(schema, vec![arr.clone()]).map_err(|e| e.to_string())?;
     let mut writer = arrow::json::LineDelimitedWriter::new(Vec::new());

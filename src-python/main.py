@@ -561,6 +561,11 @@ def _process_query(item, idx, total, args):
         if uni_exprs:
             df = df.with_columns(uni_exprs)
 
+    if fmt in ("csv", "jsonl"):
+        binary_cols = [c for c, t in df.schema.items() if t == pl.Binary]
+        if binary_cols:
+            df = df.with_columns([pl.col(c).bin.encode("hex") for c in binary_cols])
+
     row_count = len(df)
     if not args.quiet:
         print(f"Extracted and processed {row_count} rows. Saving to {current_out}...")

@@ -105,6 +105,21 @@ class SqliteEndToEnd(unittest.TestCase):
         self.assertEqual(code, 0, msg=out + err + log)
         self.assertEqual(log.count("SUCCESS"), 4)
 
+    def test_binary_column_is_written_as_hex_in_text_formats(self):
+        con = sqlite3.connect(self.db)
+        con.execute("CREATE TABLE blobs (id INTEGER, payload BLOB)")
+        con.executemany("INSERT INTO blobs VALUES (?,?)", [(1, b"\x00\xff"), (2, None), (3, b"")])
+        con.commit()
+        con.close()
+        for name in ("b.csv", "b.jsonl"):
+            code, out, err, log = self.run_main([
+                "--query", "SELECT id, payload FROM blobs ORDER BY id", "--out", name])
+            self.assertEqual(code, 0, msg=out + err + log)
+        with open(self.p("b.csv"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), "id,payload\n1,00ff\n2,\n3,\"\"\n")
+        with open(self.p("b.jsonl"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), '{"id":1,"payload":"00ff"}\n{"id":2,"payload":null}\n{"id":3,"payload":""}\n')
+
 
 if __name__ == "__main__":
     unittest.main()

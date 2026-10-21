@@ -4,6 +4,7 @@ mod cli;
 mod extract;
 mod guard;
 mod run;
+mod textfmt;
 mod textio;
 mod transform;
 mod writers;

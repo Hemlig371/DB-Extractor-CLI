@@ -47,7 +47,7 @@ impl_transport!(
         { Date[NaiveDateTime]               => Date64Micro[NaiveDateTimeWrapperMicro]   | conversion option }
         { Timestamp[NaiveDateTime]          => Date64Micro[NaiveDateTimeWrapperMicro]   | conversion none }
         { TimestampNano[NaiveDateTime]      => Date64[NaiveDateTime]                    | conversion auto }
-        { TimestampTz[DateTime<Utc>]        => DateTimeTz[DateTimeWrapperMicro]         | conversion option }
+        { TimestampTz[DateTime<Utc>]        => DateTimeTzMicro[DateTimeWrapperMicro]    | conversion option }
         { TimestampTzNano[DateTime<Utc>]    => DateTimeTz[DateTime<Utc>]                | conversion auto }
     }
 );

@@ -15,5 +15,6 @@
 | `INTERVAL DAY TO SECOND`, `INTERVAL YEAR TO MONTH` | строка в формате Oracle, например `+01 02:03:04.000000` |
 | `ROWID` | строка |
 | `TIMESTAMP WITH LOCAL TIME ZONE` | момент времени в UTC (как `TIMESTAMP WITH TIME ZONE`) |
+| `TIMESTAMP(0..6) WITH TIME ZONE` | момент времени в UTC, микросекунды (в оригинале падало с `TypeCheckFailed`: значение в микросекундах записывалось в колонку с наносекундами) |
 
 При обновлении connectorx эти изменения нужно перенести в новую версию.

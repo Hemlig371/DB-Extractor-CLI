@@ -7,12 +7,13 @@ use std::path::Path;
 use arrow::datatypes::SchemaRef;
 use arrow::ipc::writer::{FileWriter, IpcWriteOptions};
 use arrow::ipc::CompressionType;
-use arrow::json::writer::{LineDelimited, WriterBuilder as JsonWriterBuilder};
 use arrow::record_batch::RecordBatch;
 use dbx_core::compression::ResolvedCompression;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::{BrotliLevel, Compression, GzipLevel, ZstdLevel};
 use parquet::file::properties::WriterProperties;
+
+use crate::textfmt::{self, Mode};
 
 /// Строк в одной группе Parquet.
 const ROW_GROUP_ROWS: usize = 262_144;
@@ -78,32 +79,24 @@ impl Write for Out {
     }
 }
 
-struct CsvSink {
-    writer: arrow::csv::Writer<Out>,
+struct TextSink {
+    out: Out,
+    buf: Vec<u8>,
+    mode: Mode,
 }
 
-impl Sink for CsvSink {
+impl Sink for TextSink {
     fn write(&mut self, batch: &RecordBatch) -> Result<(), String> {
-        self.writer.write(batch).map_err(err)
+        self.buf.clear();
+        match self.mode {
+            Mode::Csv => textfmt::csv_rows(batch, &mut self.buf)?,
+            Mode::Json => textfmt::jsonl_rows(batch, &mut self.buf)?,
+        }
+        self.out.write_all(&self.buf).map_err(err)
     }
 
     fn finish(self: Box<Self>) -> Result<(), String> {
-        self.writer.into_inner().finish().map_err(err)
-    }
-}
-
-struct JsonlSink {
-    writer: arrow::json::writer::Writer<Out, LineDelimited>,
-}
-
-impl Sink for JsonlSink {
-    fn write(&mut self, batch: &RecordBatch) -> Result<(), String> {
-        self.writer.write(batch).map_err(err)
-    }
-
-    fn finish(mut self: Box<Self>) -> Result<(), String> {
-        self.writer.finish().map_err(err)?;
-        self.writer.into_inner().finish().map_err(err)
+        self.out.finish().map_err(err)
     }
 }
 
@@ -174,16 +167,14 @@ pub fn open_sink(
             Ok(Box::new(ParquetSink { writer }))
         }
         "csv" => {
-            let out = Out::open(path, algo, compression.level)?;
-            let mut writer = arrow::csv::WriterBuilder::new()
-                .with_header(true)
-                // Микросекунды всегда, смещение без двоеточия.
-                .with_timestamp_format("%Y-%m-%dT%H:%M:%S%.6f".to_string())
-                .with_timestamp_tz_format("%Y-%m-%dT%H:%M:%S%.6f%z".to_string())
-                .build(out);
-            // Заголовок пишется даже для пустого результата.
-            writer.write(&RecordBatch::new_empty(schema.clone())).map_err(err)?;
-            Ok(Box::new(CsvSink { writer }))
+            textfmt::check_schema(schema, Mode::Csv)?;
+            let mut out = Out::open(path, algo, compression.level)?;
+            out.write_all(&textfmt::csv_header(schema)).map_err(err)?;
+            Ok(Box::new(TextSink {
+                out,
+                buf: Vec::new(),
+                mode: Mode::Csv,
+            }))
         }
         "arrow" => {
             let mut options = IpcWriteOptions::default();
@@ -199,11 +190,13 @@ pub fn open_sink(
             Ok(Box::new(IpcSink { writer }))
         }
         "jsonl" => {
+            textfmt::check_schema(schema, Mode::Json)?;
             let out = Out::open(path, None, None)?;
-            let writer = JsonWriterBuilder::new()
-                .with_explicit_nulls(true)
-                .build::<_, LineDelimited>(out);
-            Ok(Box::new(JsonlSink { writer }))
+            Ok(Box::new(TextSink {
+                out,
+                buf: Vec::new(),
+                mode: Mode::Json,
+            }))
         }
         other => Err(format!("Unsupported format '{}'.", other)),
     }

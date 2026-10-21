@@ -32,6 +32,8 @@ parquet = { version = "56.2", features = ["arrow", "snap", "brotli", "flate2", "
 
 clap = { version = "4", features = ["derive", "env"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.10"
+zmij = "1"
 sha2 = "0.10"
 hmac = "0.12"
 flate2 = "1"

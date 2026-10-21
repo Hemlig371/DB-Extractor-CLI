@@ -25,6 +25,12 @@ POSTGRES = [
     sc("pg numbers parquet", [], ["o.parquet"], "parquet", PG_NUMBERS),
     sc("pg numbers csv", [], ["o.csv"], "csv", PG_NUMBERS),
     sc("pg numbers jsonl", [], ["o.jsonl"], "jsonl", PG_NUMBERS),
+    sc("pg text jsonl", [], ["o.jsonl"], "jsonl", PG_TEXT),
+    sc("pg json, bytea, uuid, inet jsonl", [], ["o.jsonl"], "jsonl", PG_OTHER),
+    sc("pg all types csv", [], ["o.csv"], "csv", PG_ALL),
+    sc("pg all types jsonl", [], ["o.jsonl"], "jsonl", PG_ALL),
+    sc("pg utc jsonl", ["--utc"], ["o.jsonl"], "jsonl", PG_TIME),
+    sc("pg all types cast-universal jsonl", ["--cast-universal"], ["o.jsonl"], "jsonl", PG_ALL),
     sc("pg text parquet", [], ["o.parquet"], "parquet", PG_TEXT),
     sc("pg text csv", [], ["o.csv"], "csv", PG_TEXT),
     sc("pg date and time parquet", [], ["o.parquet"], "parquet", PG_TIME),
@@ -62,15 +68,22 @@ POSTGRES = [
 
 OR_NUMBERS = "select id, n_int, n_dec, n_any, bd, bf from parity_types order by id"
 OR_TEXT = "select id, vc, nvc, ch, cl from parity_types order by id"
-OR_TIME = "select id, d, ts, tstz from parity_types order by id"
+OR_TIME = "select id, d, ts from parity_types order by id"
+OR_TZ = "select id, tstz from parity_types order by id"
 OR_BINARY = "select id, bl from parity_types order by id"
-OR_ALL = "select id, n_int, n_dec, n_any, bd, bf, vc, nvc, ch, cl, bl, d, ts, tstz from parity_types order by id"
+OR_ALL = "select id, n_int, n_dec, n_any, bd, bf, vc, nvc, ch, cl, bl, d, ts from parity_types order by id"
 OR_BIG = "select id, h, k, f, s from parity_big order by id"
 OR_NEW = "select id, flag, rw, nc, ids, iym, ltz from parity_new order by id"
 
 ORACLE = [
     sc("oracle numbers parquet", [], ["o.parquet"], "parquet", OR_NUMBERS),
     sc("oracle numbers csv", [], ["o.csv"], "csv", OR_NUMBERS),
+    sc("oracle numbers jsonl", [], ["o.jsonl"], "jsonl", OR_NUMBERS),
+    sc("oracle text jsonl", [], ["o.jsonl"], "jsonl", OR_TEXT),
+    sc("oracle date and time jsonl", [], ["o.jsonl"], "jsonl", OR_TIME),
+    sc("oracle blob csv", [], ["o.csv"], "csv", OR_BINARY),
+    sc("oracle blob jsonl", [], ["o.jsonl"], "jsonl", OR_BINARY),
+    sc("oracle all cast-universal jsonl", ["--cast-universal"], ["o.jsonl"], "jsonl", OR_ALL),
     sc("oracle text parquet", [], ["o.parquet"], "parquet", OR_TEXT),
     sc("oracle text csv", [], ["o.csv"], "csv", OR_TEXT),
     sc("oracle date and time parquet", [], ["o.parquet"], "parquet", OR_TIME),
@@ -95,6 +108,17 @@ ORACLE = [
         ["2", "false", "00", "", "", "", ""],
         ["3", "", "", "", "", "", ""],
     ]}),
+    sc("oracle timestamp with time zone csv", [], ["o.csv"], "csv", OR_TZ, rust_only=True, expect={"o.csv": [
+        ["ID", "TSTZ"],
+        ["1", "2024-01-02T00:04:05.123456+0000"],
+        ["2", ""],
+        ["3", "1970-01-01T00:00:00.000000+0000"],
+    ]}),
+    sc("oracle timestamp with time zone jsonl", [], ["o.jsonl"], "jsonl", OR_TZ, rust_only=True, expect={"o.jsonl": [
+        {"ID": 1, "TSTZ": "2024-01-02T00:04:05.123456+00:00"},
+        {"ID": 2, "TSTZ": None},
+        {"ID": 3, "TSTZ": "1970-01-01T00:00:00+00:00"},
+    ]}),
     sc("oracle rowid csv", [], ["o.csv"], "csv", "select id, rowid as rid from parity_new order by id",
        rust_only=True, expect={"o.csv": [
            ["ID", "RID"], ["1", "re:^[A-Za-z0-9+/]{18}$"], ["2", "re:^[A-Za-z0-9+/]{18}$"],
@@ -102,7 +126,7 @@ ORACLE = [
     sc("oracle patched types cast-universal jsonl", ["--cast-universal"], ["o.jsonl"], "jsonl", OR_NEW,
        rust_only=True, expect={"o.jsonl": [
            {"ID": 1, "FLAG": True, "RW": "cafebabe", "NC": "nclob text", "IDS": "+01 02:03:04.500", "IYM": "+03-04",
-            "LTZ": "2024-01-02T03:04:05.123456"},
+            "LTZ": "2024-01-02 03:04:05.123456"},
            {"ID": 2, "FLAG": False, "RW": "00", "NC": None, "IDS": None, "IYM": None, "LTZ": None},
            {"ID": 3, "FLAG": None, "RW": None, "NC": None, "IDS": None, "IYM": None, "LTZ": None},
        ]}),
