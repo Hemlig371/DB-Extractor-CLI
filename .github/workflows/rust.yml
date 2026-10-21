@@ -86,6 +86,7 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then EXE="$EXE.exe"; fi
           cp "$EXE" dist/pkg/
           cp src-rust/README.md dist/pkg/README.md
+          cp src-rust/Cargo.lock dist/pkg/Cargo.lock
           cargo --version > dist/pkg/BUILD-INFO.txt
           rustc --version >> dist/pkg/BUILD-INFO.txt
           (cd src-rust && cargo tree -p db-extractor --depth 1 >> ../dist/pkg/BUILD-INFO.txt)

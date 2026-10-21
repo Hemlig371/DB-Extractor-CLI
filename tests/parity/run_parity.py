@@ -83,7 +83,6 @@ SCENARIOS = [
     sc("utc", ["--utc"], ["o.parquet"], "parquet"),
     sc("cast-universal", ["--cast-universal"], ["o.parquet"], "parquet"),
     sc("categorize", ["--categorize", "name"], ["o.parquet"], "parquet"),
-    sc("partitions", ["--partition-on", "id", "--partitions", "2"], ["o.parquet"], "parquet", sort=True),
     sc("empty result parquet", [], ["o.parquet"], "parquet", sql="select id, name from people where 1 = 0"),
     sc("empty result csv", [], ["o.csv"], "csv", sql="select id, name from people where 1 = 0"),
     sc("bad format fails before the query", ["--format", "csv", "--compression", "gzip:99"], [], "csv", exit_code=1),
@@ -95,6 +94,11 @@ SCENARIOS = [
            "-- @DX_OUT: b.csv\n-- @DX_DROP_NULLS: name\n" + SELECT_BASIC + ";\n"
        )),
 ]
+
+if sys.platform != "win32":
+    # connectorx не раскодирует путь SQLite при поиске границ партиций; на Windows путь обязан быть закодирован
+    SCENARIOS.append(
+        sc("partitions", ["--partition-on", "id", "--partitions", "2"], ["o.parquet"], "parquet", sort=True))
 
 
 # --------------------------------------------------------------------------
