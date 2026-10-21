@@ -140,6 +140,30 @@ class TransformTests(CliTestCase):
         out = self.read(self.extract(df, "--categorize", "status", "--cast-universal"))
         self.assertEqual(out.schema["status"], pl.String)
 
+    def test_cast_universal_decimal_scale_zero_becomes_int64(self):
+        df = pl.DataFrame({"n": pl.Series("n", [Decimal("42"), None], dtype=pl.Decimal(10, 0))})
+        out = self.read(self.extract(df, "--cast-universal"))
+        self.assertEqual(out.schema["n"], pl.Int64)
+        self.assertEqual(out["n"].to_list(), [42, None])
+
+    def test_cast_universal_nested_types_become_json_strings(self):
+        df = pl.DataFrame({
+            "l": [[1, 2], None, []],
+            "s": [{"a": 1, "b": "x"}, None, {"a": None, "b": "y"}],
+        })
+        out = self.read(self.extract(df, "--cast-universal"))
+        self.assertEqual(out.schema["l"], pl.String)
+        self.assertEqual(out["l"].to_list(), ["[1,2]", None, "[]"])
+        self.assertEqual(out["s"].to_list(), ['{"a":1,"b":"x"}', None, '{"a":null,"b":"y"}'])
+
+    # --- categorize в форматах, отличных от Parquet -----------------------
+    def test_categorize_is_applied_only_to_parquet(self):
+        df = pl.DataFrame({"status": ["a", "b", "a"]})
+        r = self.run_cli(BASE + ["--query", "select 1", "--out", "o.arrow", "--categorize", "status"],
+                         read=lambda **kw: df)
+        self.assertEqual(r.code, 0, msg=r.out + r.err + r.log)
+        self.assertEqual(pl.read_ipc(r.path("o.arrow")).schema["status"], pl.String)
+
     # --- запись ---------------------------------------------------------
     def test_csv_gzip_under_plain_csv_name(self):
         df = pl.DataFrame({"a": [1, 2], "b": ["x", "y"]})

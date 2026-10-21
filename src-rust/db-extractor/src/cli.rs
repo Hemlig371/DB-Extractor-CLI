@@ -1,5 +1,4 @@
-//! Командная строка. Флаги, их имена и значения по умолчанию совпадают с Python-версией;
-//! добавлены только `--hash-salt` и `--batch-size`.
+//! Командная строка.
 
 use clap::{ArgGroup, Parser};
 use dbx_core::annotations::BaseOptions;

@@ -14,7 +14,7 @@ use parquet::arrow::ArrowWriter;
 use parquet::basic::{BrotliLevel, Compression, GzipLevel, ZstdLevel};
 use parquet::file::properties::WriterProperties;
 
-/// Строк в одной группе Parquet (то же значение по умолчанию, что у polars).
+/// Строк в одной группе Parquet.
 const ROW_GROUP_ROWS: usize = 262_144;
 const DEFAULT_GZIP_LEVEL: u32 = 6;
 const DEFAULT_ZSTD_LEVEL: i32 = 3;
@@ -27,10 +27,6 @@ pub trait Sink {
 fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
-
-// --------------------------------------------------------------------------
-// Выходной поток с необязательным сжатием (CSV, JSONL)
-// --------------------------------------------------------------------------
 
 enum Out {
     Plain(BufWriter<File>),
@@ -82,10 +78,6 @@ impl Write for Out {
     }
 }
 
-// --------------------------------------------------------------------------
-// CSV
-// --------------------------------------------------------------------------
-
 struct CsvSink {
     writer: arrow::csv::Writer<Out>,
 }
@@ -99,10 +91,6 @@ impl Sink for CsvSink {
         self.writer.into_inner().finish().map_err(err)
     }
 }
-
-// --------------------------------------------------------------------------
-// JSONL
-// --------------------------------------------------------------------------
 
 struct JsonlSink {
     writer: arrow::json::writer::Writer<Out, LineDelimited>,
@@ -118,10 +106,6 @@ impl Sink for JsonlSink {
         self.writer.into_inner().finish().map_err(err)
     }
 }
-
-// --------------------------------------------------------------------------
-// Parquet
-// --------------------------------------------------------------------------
 
 struct ParquetSink {
     writer: ArrowWriter<File>,
@@ -154,10 +138,6 @@ impl Sink for ParquetSink {
     }
 }
 
-// --------------------------------------------------------------------------
-// Arrow IPC (файловый формат)
-// --------------------------------------------------------------------------
-
 struct IpcSink {
     writer: FileWriter<BufWriter<File>>,
 }
@@ -173,8 +153,6 @@ impl Sink for IpcSink {
         inner.flush().map_err(err)
     }
 }
-
-// --------------------------------------------------------------------------
 
 /// Открывает приёмник данных для файла `path`.
 pub fn open_sink(
@@ -199,7 +177,7 @@ pub fn open_sink(
             let out = Out::open(path, algo, compression.level)?;
             let mut writer = arrow::csv::WriterBuilder::new()
                 .with_header(true)
-                // Формат времени как у polars: микросекунды всегда, смещение без двоеточия.
+                // Микросекунды всегда, смещение без двоеточия.
                 .with_timestamp_format("%Y-%m-%dT%H:%M:%S%.6f".to_string())
                 .with_timestamp_tz_format("%Y-%m-%dT%H:%M:%S%.6f%z".to_string())
                 .build(out);

@@ -1,14 +1,12 @@
-//! Преобразования данных по пакетам (потоково): хеширование, UTC, заполнение и удаление NULL,
-//! универсальное приведение типов, категоризация.
-//!
-//! План строится один раз по схеме результата, затем применяется к каждому пакету строк.
+//! Преобразования по пакетам: хеширование, UTC, заполнение и удаление NULL, универсальное
+//! приведение типов, категоризация. План строится один раз по схеме результата.
 //! Порядок шагов: hash -> utc -> fill-nulls -> drop-nulls -> cast-universal -> categorize.
-//! (В Python-версии категоризация стоит раньше, но это лишь способ хранения значений;
-//! результат тот же.)
 
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, AsArray, BooleanArray, Int64Array, PrimitiveArray, StringArray, StringBuilder};
+use arrow::array::{
+    Array, ArrayBuilder, ArrayRef, AsArray, BooleanArray, Int64Array, PrimitiveArray, StringArray, StringBuilder,
+};
 use arrow::compute::kernels::zip::zip;
 use arrow::compute::{and, cast, filter, is_not_null};
 use arrow::datatypes::{
@@ -107,8 +105,7 @@ impl Plan {
             }
         };
 
-        // --cast-universal возвращает категориальные колонки в строки (как в Python-версии);
-        // для не-Parquet форматов категоризация ничего не меняет в содержимом.
+        // --cast-universal возвращает категориальные колонки в строки; вне Parquet категоризация не нужна.
         let categorize = if input.cast_universal || !input.parquet_output {
             Vec::new()
         } else {
@@ -184,10 +181,6 @@ impl Plan {
     }
 }
 
-// --------------------------------------------------------------------------
-// hash
-// --------------------------------------------------------------------------
-
 fn hex_digest(data: &[u8], salt: Option<&[u8]>) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let bytes: Vec<u8> = match salt {
@@ -243,10 +236,6 @@ pub fn hash_array(arr: &ArrayRef, salt: Option<&[u8]>) -> Result<ArrayRef, Strin
     Ok(Arc::new(b.finish()))
 }
 
-// --------------------------------------------------------------------------
-// utc
-// --------------------------------------------------------------------------
-
 /// Временные метки помечаются часовым поясом UTC (значения хранятся как моменты времени UTC).
 fn to_utc(arr: &ArrayRef) -> ArrayRef {
     match arr.data_type() {
@@ -271,10 +260,6 @@ fn to_utc(arr: &ArrayRef) -> ArrayRef {
         _ => arr.clone(),
     }
 }
-
-// --------------------------------------------------------------------------
-// fill-nulls
-// --------------------------------------------------------------------------
 
 fn fill_with(arr: &ArrayRef, replacement: ArrayRef) -> Result<ArrayRef, String> {
     if arr.null_count() == 0 {
@@ -314,10 +299,6 @@ pub fn fill_nulls(arr: &ArrayRef) -> Result<ArrayRef, String> {
     Ok(arr.clone())
 }
 
-// --------------------------------------------------------------------------
-// drop-nulls
-// --------------------------------------------------------------------------
-
 fn drop_null_rows(cols: Vec<ArrayRef>, idx: &[usize]) -> Result<Vec<ArrayRef>, String> {
     if idx.iter().all(|&i| cols[i].null_count() == 0) {
         return Ok(cols);
@@ -334,10 +315,6 @@ fn drop_null_rows(cols: Vec<ArrayRef>, idx: &[usize]) -> Result<Vec<ArrayRef>, S
         .map(|c| filter(c.as_ref(), &mask).map_err(|e| e.to_string()))
         .collect()
 }
-
-// --------------------------------------------------------------------------
-// cast-universal
-// --------------------------------------------------------------------------
 
 fn to_display_strings(arr: &ArrayRef) -> Result<ArrayRef, String> {
     let opts = FormatOptions::default();
@@ -437,10 +414,6 @@ pub fn universal(arr: &ArrayRef) -> Result<ArrayRef, String> {
         },
     }
 }
-
-// --------------------------------------------------------------------------
-// categorize
-// --------------------------------------------------------------------------
 
 fn categorize(arr: &ArrayRef) -> Result<ArrayRef, String> {
     if matches!(arr.data_type(), DataType::Dictionary(_, _)) {

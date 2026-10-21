@@ -1,5 +1,4 @@
-//! Выбор формата вывода и сжатия. Порт `parse_compression`, `_resolve_format`,
-//! `_resolve_compression` из Python-версии.
+//! Выбор формата вывода и сжатия.
 
 pub const SUPPORTED_FORMATS: [&str; 4] = ["csv", "parquet", "arrow", "jsonl"];
 pub const PARQUET_COMPRESSIONS: [&str; 6] = ["uncompressed", "snappy", "gzip", "brotli", "lz4", "zstd"];

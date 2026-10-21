@@ -1,5 +1,4 @@
-//! db-extractor (сборка на Rust): выгрузка из БД в Parquet/CSV/Arrow IPC/JSONL.
-//! Интерфейс совпадает с Python-версией (`src-python/main.py`).
+//! db-extractor: выгрузка из БД в Parquet/CSV/Arrow IPC/JSONL.
 
 mod cli;
 mod extract;
@@ -76,7 +75,6 @@ fn main() {
         }
     };
 
-    // --- строка подключения ---
     let env_conn = std::env::var(CONN_ENV_VAR).ok().filter(|v| !v.is_empty());
     if args.conn.as_deref().unwrap_or("").is_empty() && args.conn_file.is_none() && env_conn.is_none() {
         Cli::command()
@@ -111,7 +109,6 @@ fn main() {
         exit(1);
     }
 
-    // --- запросы ---
     let base = args.base_options();
     let mut queries: Vec<QueryParams> = Vec::new();
 

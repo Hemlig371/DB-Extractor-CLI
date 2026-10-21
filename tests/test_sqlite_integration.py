@@ -3,6 +3,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+import urllib.parse
 
 import contextlib
 import io
@@ -27,7 +28,7 @@ class SqliteEndToEnd(unittest.TestCase):
              for i in range(1, 21)])
         con.commit()
         con.close()
-        self.conn = "sqlite://" + self.db
+        self.conn = "sqlite://" + urllib.parse.quote(self.db)
 
     def run_main(self, argv):
         old = os.getcwd()

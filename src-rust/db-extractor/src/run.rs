@@ -90,7 +90,6 @@ fn run_query(item: &QueryParams, idx: usize, total: usize, ctx: &Ctx) -> Result<
 
     let out = item.out.clone().unwrap_or_default();
 
-    // Всё, что можно проверить без БД, проверяем до запроса.
     let format = resolve_format(item.format.as_deref(), &out)?;
     let compression = resolve_compression(item.compression.as_deref(), item.compression_level, &out, &format)?;
     for message in &compression.warnings {

@@ -16,6 +16,7 @@ SUPPORTED_FORMATS = ("csv", "parquet", "arrow", "jsonl")
 PARQUET_COMPRESSIONS = ("uncompressed", "snappy", "gzip", "brotli", "lz4", "zstd")
 ARROW_COMPRESSIONS = ("uncompressed", "lz4", "zstd")
 COMPRESSION_ALIASES = {"gz": "gzip", "zst": "zstd", "none": "uncompressed"}
+LEVEL_RANGES = {"gzip": (0, 9), "zstd": (1, 22), "brotli": (0, 11)}
 CONN_ENV_VAR = "DB_EXTRACTOR_CONN"
 SALT_ENV_VAR = "DB_EXTRACTOR_HASH_SALT"
 
@@ -23,10 +24,6 @@ SALT_ENV_VAR = "DB_EXTRACTOR_HASH_SALT"
 class QueryError(Exception):
     """Ошибка конкретного запроса, которую нужно записать в лог и вывести пользователю."""
 
-
-# --------------------------------------------------------------------------
-# Разбор SQL
-# --------------------------------------------------------------------------
 
 _DOLLAR_TAG = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$")
 _Q_CLOSE = {"[": "]", "{": "}", "(": ")", "<": ">"}
@@ -165,10 +162,6 @@ def _comment_text(sql):
     return "\n".join(chunks)
 
 
-# --------------------------------------------------------------------------
-# Аннотации -- @DX_*
-# --------------------------------------------------------------------------
-
 def parse_compression(value):
     """'ZSTD:10' -> ('zstd', 10, True). Третье значение False, если уровень не число."""
     if not value:
@@ -294,10 +287,6 @@ def hash_text(value, salt=None):
     return hashlib.sha256(data).hexdigest()
 
 
-# --------------------------------------------------------------------------
-# Лог и сообщения
-# --------------------------------------------------------------------------
-
 def mask_secrets(text, conn):
     """Убирает пароль из текста ошибки: и по строке подключения, и по общим шаблонам."""
     text = str(text)
@@ -338,10 +327,6 @@ def log_export(status, query, start_time, end_time, out_file=None, row_count=0, 
                 f.write(f"[{timestamp}] ERROR | Time: {duration:.2f}s | Error: {error_line} | Query: {clean_query}\n")
 
 
-# --------------------------------------------------------------------------
-# Выбор колонок
-# --------------------------------------------------------------------------
-
 def resolve_columns(requested, available):
     """Сопоставляет запрошенные имена колонок с фактическими без учёта регистра.
 
@@ -366,10 +351,6 @@ def resolve_columns(requested, available):
             found.append(actual)
     return found, missing
 
-
-# --------------------------------------------------------------------------
-# Обработка одного запроса
-# --------------------------------------------------------------------------
 
 def _resolve_format(item, out):
     fmt = item["format"]
@@ -425,6 +406,18 @@ def _resolve_compression(item, out, fmt, args):
         if comp not in (None, "uncompressed"):
             warn(args, "JSONL compression '%s' is not supported and is ignored." % comp)
         comp = None
+
+    # Уровень проверяется до обращения к БД; алгоритмы без уровней его игнорируют.
+    if comp is None:
+        level = None
+    elif level is not None:
+        if comp in LEVEL_RANGES:
+            low, high = LEVEL_RANGES[comp]
+            if not low <= level <= high:
+                raise QueryError("Compression level %d is out of range for %s (%d-%d)." % (level, comp, low, high))
+        else:
+            warn(args, "Compression level is ignored: '%s' has no levels." % comp)
+            level = None
     return comp, level
 
 
@@ -461,7 +454,6 @@ def _process_query(item, idx, total, args):
     for message in item.get("warnings", []):
         warn(args, message)
 
-    # Всё, что можно проверить без БД, проверяем до запроса.
     fmt = _resolve_format(item, current_out)
     compression, compression_level = _resolve_compression(item, current_out, fmt, args)
 
@@ -485,14 +477,16 @@ def _process_query(item, idx, total, args):
             print(f"  -> Partitioning enabled: on '{item['partition_on']}' with {item['partitions']} partitions")
 
     start_time = datetime.datetime.now()
+    # connectorx оборачивает запрос в подзапрос без перевода строки: завершающий `-- комментарий`
+    # (например аннотация) «съел» бы закрывающую скобку.
+    db_query = current_sql + "\n" if "partition_on" in kwargs else current_sql
     df = pl.read_database_uri(
-        query=current_sql,
+        query=db_query,
         uri=args.conn,
         engine="connectorx",
         **kwargs
     )
 
-    # Data transformations
     if item["hash_columns"]:
         columns, missing = resolve_columns(item["hash_columns"], df.columns)
         if missing:
@@ -516,8 +510,10 @@ def _process_query(item, idx, total, args):
                     df = df.with_columns(pl.col(col).dt.convert_time_zone("UTC"))
 
     if item["categorize"]:
-        for col in _select_columns(args, df, item["categorize"], "--categorize"):
-            df = df.with_columns(pl.col(col).cast(pl.Categorical))
+        categorize_cols = _select_columns(args, df, item["categorize"], "--categorize")
+        if fmt == "parquet":  # в остальных форматах значения и так строки; в Arrow IPC словари не нужны
+            for col in categorize_cols:
+                df = df.with_columns(pl.col(col).cast(pl.Categorical))
 
     if item.get("fill_nulls") is not None:
         if len(item["fill_nulls"]) == 0:
@@ -544,32 +540,23 @@ def _process_query(item, idx, total, args):
         uni_exprs = []
         for col, dtype in df.schema.items():
             if isinstance(dtype, pl.Decimal):
-                s_utf8 = df[col].cast(pl.String)
-                orig_nulls = s_utf8.null_count()
-
-                # 1. Пробуем Int64, если шкала 0
-                casted = False
-                if dtype.scale == 0:
-                    s_int = s_utf8.cast(pl.Int64, strict=False)
-                    if s_int.null_count() == orig_nulls:
-                        uni_exprs.append(pl.col(col).cast(pl.String).cast(pl.Int64, strict=False))
-                        casted = True
-
-                # 2. Пробуем Float64 (для дробных или если Int64 дал new nulls)
-                if not casted:
-                    s_float = s_utf8.cast(pl.Float64, strict=False)
-                    if s_float.null_count() == orig_nulls:
-                        uni_exprs.append(pl.col(col).cast(pl.String).cast(pl.Float64, strict=False))
-                    else:
-                        # 3. Фолбэк на строку, если ничего не подошло
-                        uni_exprs.append(pl.col(col).cast(pl.String))
-
+                # Масштаб 0 и до 18 знаков помещаются в Int64, остальное идёт в Float64 (через строку).
+                if dtype.scale == 0 and dtype.precision is not None and dtype.precision <= 18:
+                    uni_exprs.append(pl.col(col).cast(pl.Int64))
+                else:
+                    uni_exprs.append(pl.col(col).cast(pl.String).cast(pl.Float64, strict=False))
             elif isinstance(dtype, pl.Datetime):
                 c = pl.col(col).dt.cast_time_unit("us")
                 if dtype.time_zone is not None:
                     c = c.dt.convert_time_zone("UTC").dt.replace_time_zone(None)
                 uni_exprs.append(c)
-            elif dtype in (pl.Object, pl.Unknown, pl.Categorical, pl.Int128):
+            elif isinstance(dtype, (pl.List, pl.Array, pl.Struct)):
+                # Вложенные типы как JSON-строки (NULL остаётся NULL).
+                encoded = (pl.struct(pl.col(col).alias("c")).struct.json_encode()
+                           .str.strip_prefix('{"c":').str.strip_suffix("}"))
+                uni_exprs.append(
+                    pl.when(pl.col(col).is_null()).then(pl.lit(None, dtype=pl.String)).otherwise(encoded).alias(col))
+            elif dtype in (pl.Object, pl.Unknown, pl.Categorical, pl.Int128) or isinstance(dtype, (pl.Duration, pl.Enum)):
                 uni_exprs.append(pl.col(col).cast(pl.String))
         if uni_exprs:
             df = df.with_columns(uni_exprs)
@@ -622,10 +609,6 @@ def process_query(item, idx, total, args):
             print(f"Error on query {idx+1}: {message}")
         return False
 
-
-# --------------------------------------------------------------------------
-# Командная строка
-# --------------------------------------------------------------------------
 
 def _read_text(path, encoding):
     with open(path, "r", encoding=encoding) as f:
@@ -692,7 +675,6 @@ def main():
 
     queries_to_run = []
 
-    # Считываем SQL запрос(ы)
     if args.query_file:
         if os.path.isdir(args.query_file):
             files_to_process = _sql_files(args.query_file)

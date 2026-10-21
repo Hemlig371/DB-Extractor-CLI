@@ -7,7 +7,7 @@ fn normalize_label(label: &str) -> String {
     label.trim().to_lowercase().replace('_', "-")
 }
 
-/// Декодирует байты в текст. Некорректные последовательности это ошибка (как в Python-версии).
+/// Декодирует байты в текст. Некорректные последовательности это ошибка.
 pub fn decode(bytes: &[u8], encoding: &str) -> Result<String, String> {
     let label = normalize_label(encoding);
     match label.as_str() {

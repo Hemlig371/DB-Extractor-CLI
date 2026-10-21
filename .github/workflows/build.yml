@@ -42,7 +42,7 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --name db-extractor-${{ runner.os }} --onedir --collect-all connectorx --collect-all polars --collect-all pyarrow src-python/main.py
+        pyinstaller --name db-extractor-${{ runner.os }} --onedir --collect-all connectorx --collect-all polars --collect-all pyarrow --collect-all tzdata src-python/main.py
 
     - name: Smoke test the built binary
       shell: bash

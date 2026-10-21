@@ -160,6 +160,15 @@ class Partitioning(CliTestCase):
                                  "--partition-on", "id", "--partitions", "4"])
         self.assertEqual(r.calls[0]["kwargs"], {"partition_on": "id", "partition_num": 4})
 
+    def test_partitioned_query_ends_with_newline_so_trailing_comment_is_safe(self):
+        r = self.run_cli(BASE + ["--query", "select 1 -- @DX_UTC", "--out", "o.parquet",
+                                 "--partition-on", "id", "--partitions", "2"])
+        self.assertTrue(r.calls[0]["query"].endswith("\n"))
+
+    def test_plain_query_is_passed_unchanged(self):
+        r = self.run_cli(BASE + ["--query", "select 1", "--out", "o.parquet"])
+        self.assertEqual(r.calls[0]["query"], "select 1")
+
     def test_only_one_option_warns_and_disables_partitioning(self):
         r = self.run_cli(BASE + ["--query", "select 1", "--out", "o.parquet", "--partitions", "4"])
         self.assertEqual(r.code, 0)
@@ -338,6 +347,18 @@ class WritingFiles(CliTestCase):
         r = self.run_cli(BASE + ["--query", "select 1", "--out", "o.parquet", "--compression", "ZSTD:5"])
         _, _, kw = self.only_write(r)
         self.assertEqual(kw, {"compression": "zstd", "compression_level": 5})
+
+    def test_compression_level_out_of_range_fails_before_the_query(self):
+        r = self.run_cli(BASE + ["--query", "select 1", "--out", "o.parquet", "--compression", "gzip:99"])
+        self.assertEqual(r.code, 1)
+        self.assertEqual(r.calls, [])
+        self.assertIn("out of range", r.log)
+
+    def test_level_is_ignored_for_algorithms_without_levels(self):
+        r = self.run_cli(BASE + ["--query", "select 1", "--out", "o.parquet", "--compression", "snappy:3"])
+        _, _, kw = self.only_write(r)
+        self.assertEqual(kw, {"compression": "snappy"})
+        self.assertIn("no levels", r.err)
 
     def test_parquet_gz_extension_selects_gzip(self):
         r = self.run_cli(BASE + ["--query", "select 1", "--out", "o.parquet.gz"])

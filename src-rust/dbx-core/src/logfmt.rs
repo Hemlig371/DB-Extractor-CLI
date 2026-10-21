@@ -1,4 +1,4 @@
-//! Формат строк `export_log.txt` (совпадает с Python-версией).
+//! Формат строк `export_log.txt`.
 
 use crate::sqlsplit::strip_sql_comments;
 
