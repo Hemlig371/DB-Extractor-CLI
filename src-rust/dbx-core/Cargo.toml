@@ -1,0 +1,8 @@
+[package]
+name = "dbx-core"
+version = "0.1.0"
+edition = "2021"
+description = "Pure logic of db-extractor (SQL splitting, @DX_ annotations, option resolution); no external dependencies"
+license = "MIT"
+
+[dependencies]

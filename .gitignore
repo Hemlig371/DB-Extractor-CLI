@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+export_log.txt
+src-rust/target/

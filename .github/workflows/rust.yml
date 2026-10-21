@@ -1,0 +1,138 @@
+name: Rust build and tests
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - 'src-rust/**'
+      - 'src-python/**'
+      - 'tests/parity/**'
+      - '.github/workflows/rust.yml'
+  pull_request:
+    paths:
+      - 'src-rust/**'
+      - 'src-python/**'
+      - 'tests/parity/**'
+      - '.github/workflows/rust.yml'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Имя тега для релиза (например, v1.0.0); пусто: только сборка и тесты'
+        required: false
+        default: ''
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  core:
+    name: Core logic (no database, no Arrow)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-rust
+      - name: Test dbx-core
+        working-directory: src-rust
+        run: cargo test -p dbx-core
+
+  build:
+    name: Build, test, parity on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-rust
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+
+      - name: Unit tests
+        working-directory: src-rust
+        run: cargo test --workspace --release
+
+      - name: Build release binary
+        working-directory: src-rust
+        run: cargo build --release -p db-extractor
+
+      - name: Binary starts without any database client installed
+        shell: bash
+        run: |
+          EXE="src-rust/target/release/db-extractor"
+          if [ "$RUNNER_OS" = "Windows" ]; then EXE="$EXE.exe"; fi
+          "$EXE" --help
+          ls -l "$EXE"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python version (for the parity check)
+        run: |
+          python -m pip install --upgrade pip
+          pip install --prefer-binary -r requirements.txt
+
+      - name: Parity check, Python vs Rust on SQLite
+        shell: bash
+        run: |
+          EXE="src-rust/target/release/db-extractor"
+          if [ "$RUNNER_OS" = "Windows" ]; then EXE="$EXE.exe"; fi
+          python tests/parity/run_parity.py --rust "$EXE" --keep
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist/pkg
+          EXE="src-rust/target/release/db-extractor"
+          if [ "$RUNNER_OS" = "Windows" ]; then EXE="$EXE.exe"; fi
+          cp "$EXE" dist/pkg/
+          cp src-rust/README.md dist/pkg/README.md
+          cargo --version > dist/pkg/BUILD-INFO.txt
+          rustc --version >> dist/pkg/BUILD-INFO.txt
+          (cd src-rust && cargo tree -p db-extractor --depth 1 >> ../dist/pkg/BUILD-INFO.txt)
+          python -c "import shutil; shutil.make_archive('dist/db-extractor-rust-${{ runner.os }}', 'zip', 'dist/pkg')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: db-extractor-rust-${{ runner.os }}
+          path: dist/db-extractor-rust-${{ runner.os }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Attach to GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '')
+    permissions:
+      contents: write
+    # Python- и Rust-сборки дописывают файлы в один черновик релиза; параллельный запуск создал бы два черновика.
+    concurrency:
+      group: release-${{ inputs.tag_name || github.ref_name }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: db-extractor-rust-*
+          merge-multiple: true
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          tag_name: ${{ inputs.tag_name || github.ref_name }}
+          files: artifacts/*
+          generate_release_notes: true

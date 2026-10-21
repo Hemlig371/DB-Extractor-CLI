@@ -1,0 +1,41 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Python ${{ matrix.python }}, polars ${{ matrix.polars }}, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ['3.11', '3.13']
+        polars: ['1.*', '2.*']
+        exclude:
+          # Достаточно одной версии Python на непрофильных ОС
+          - os: windows-latest
+            python: '3.13'
+          - os: macos-latest
+            python: '3.13'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install --prefer-binary -r requirements.txt "polars==${{ matrix.polars }}"
+          pip list | grep -i -E "polars|connectorx|pyarrow"
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
