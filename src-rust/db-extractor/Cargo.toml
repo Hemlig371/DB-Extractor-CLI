@@ -13,8 +13,8 @@ path = "src/main.rs"
 dbx-core = { path = "../dbx-core" }
 
 # Все источники connectorx включены при сборке; нужный выбирается по схеме URI во время работы.
-# Берём тег из git: он совпадает с пакетом connectorx 0.4.6 на PyPI, на который опирается Python-версия.
-connectorx = { git = "https://github.com/sfu-db/connector-x", tag = "v0.4.6", features = [
+# Копия connectorx 0.4.6 в vendor/connectorx (изменения перечислены в vendor/connectorx/VENDORED.md).
+connectorx = { path = "../vendor/connectorx", features = [
   "dst_arrow",
   "src_postgres",
   "src_mysql",
@@ -27,7 +27,7 @@ connectorx = { git = "https://github.com/sfu-db/connector-x", tag = "v0.4.6", fe
 ] }
 
 # Версия arrow должна совпадать с той, что использует connectorx (56.x), иначе типы RecordBatch не совместимы.
-arrow = { version = "56.2", features = ["ipc_compression"] }
+arrow = { version = "56.2", features = ["ipc_compression", "chrono-tz"] }
 parquet = { version = "56.2", features = ["arrow", "snap", "brotli", "flate2", "lz4", "zstd"] }
 
 clap = { version = "4", features = ["derive", "env"] }

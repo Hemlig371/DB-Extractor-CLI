@@ -14,7 +14,7 @@
 
 ## Источники данных
 
-Oracle, PostgreSQL, ClickHouse, MySQL/MariaDB, SQL Server/Azure SQL, SQLite, BigQuery, Trino, Redshift. Подключение только через URI (таблица с примерами в основном README). Пересобирать бинарник для другой БД из этого списка не нужно. Для Oracle на машине должен стоять Oracle Instant Client: бинарник запускается и без него, ошибка появится только при подключении к Oracle (с подсказкой, куда его положить). БД, которых нет в списке, выгружайте через DuckDB.
+Oracle, PostgreSQL, ClickHouse, MySQL/MariaDB, SQL Server/Azure SQL, SQLite, BigQuery, Trino, Redshift. Подключение только через URI (таблица с примерами в основном README). Пересобирать бинарник для другой БД из этого списка не нужно. Для Oracle на машине должен стоять Oracle Instant Client: бинарник запускается и без него, ошибка появится только при подключении к Oracle (с подсказкой, куда его положить). Вход в SQL Server на Linux только по логину и паролю: интегрированная аутентификация (Kerberos) не включена, зато бинарник не зависит от системных библиотек Kerberos. На Windows интегрированная аутентификация работает. БД, которых нет в списке, выгружайте через DuckDB.
 
 ## Потоковая запись
 
@@ -28,7 +28,9 @@ Oracle, PostgreSQL, ClickHouse, MySQL/MariaDB, SQL Server/Azure SQL, SQLite, Big
 
 ## Обработка ошибок и неподдерживаемые типы
 
-connectorx сообщает о неподдержанных типах паникой (`unimplemented!`), а не обычной ошибкой. Бинарник перехватывает такие паники и превращает их в запись `ERROR` в журнале и сообщение с подсказкой: приведите колонку в самом SQL (`TO_CHAR(col)`, `CAST(col AS VARCHAR)`). Сюда относятся, например, Oracle `INTERVAL`, `ROWID`, `RAW`, `TIMESTAMP WITH LOCAL TIME ZONE` и PostgreSQL `interval`, `money`, `xml`.
+connectorx сообщает о неподдержанных типах паникой (`unimplemented!`), а не обычной ошибкой. Бинарник перехватывает такие паники и превращает их в запись `ERROR` в журнале и сообщение с подсказкой: приведите колонку в самом SQL (`TO_CHAR(col)`, `CAST(col AS VARCHAR)`). Сюда относятся, например, PostgreSQL `interval`, `money`, `xml` и `numeric` без указания точности.
+
+Oracle-типы, на которых оригинальный connectorx падает, в этой сборке читаются (патч лежит в `vendor/connectorx`, список изменений в `vendor/connectorx/VENDORED.md`): `BOOLEAN` (Boolean), `RAW` и `LONG RAW` (бинарные данные), `NCLOB` (строка), `INTERVAL DAY TO SECOND` и `INTERVAL YEAR TO MONTH` (строка в формате Oracle), `ROWID` (строка), `TIMESTAMP WITH LOCAL TIME ZONE` (момент времени в UTC). Python-версия использует connectorx из PyPI, поэтому эти типы в ней по-прежнему нужно приводить в самом запросе.
 
 ## Сборка
 
@@ -39,19 +41,20 @@ cargo build --release -p db-extractor
 cargo test --workspace --release
 ```
 
-Нужны Rust (stable), на Linux ещё `pkg-config`, `libssl-dev`, `libkrb5-dev`, `clang` и `libclang-dev`; для сборки OpenSSL на Windows нужен Perl (есть в Git for Windows и Strawberry Perl). Первая сборка долгая (connectorx с десятью источниками), следующие используют кэш.
+Нужны Rust (stable), на Linux ещё `pkg-config` и `libssl-dev`; для сборки OpenSSL на Windows нужен Perl (есть в Git for Windows и Strawberry Perl). Первая сборка долгая (connectorx с десятью источниками), следующие используют кэш.
 
 Структура:
+- `vendor/connectorx` : копия connectorx 0.4.6 с патчем Oracle и без Kerberos.
 - `dbx-core` : чистая логика без зависимостей (разбор SQL, аннотации, выбор формата и сжатия, сопоставление колонок, маскирование паролей, формат журнала). Тесты запускаются быстро: `cargo test -p dbx-core`.
 - `db-extractor` : чтение (`extract`), преобразования (`transform`), запись (`writers`), запуск и журнал (`run`), командная строка (`cli`).
 
 ## Сравнение с Python-версией
 
-`tests/parity/run_parity.py` запускает обе версии на одной SQLite-базе по 25 сценариям (форматы, сжатие, хеши, заполнение и удаление NULL, UTC, универсальный каст, категоризация, партиции, пустой результат, ошибки, аннотации) и сравнивает коды возврата, записи журнала и содержимое файлов (имена колонок, семейства типов, значения). В CI это отдельный шаг на каждой ОС.
+`tests/parity/run_parity.py` запускает обе версии на одной SQLite-базе по 30 сценариям (форматы, сжатие, хеши, заполнение и удаление NULL, UTC, универсальный каст, категоризация, партиции, пустой результат, ошибки, аннотации) и сравнивает коды возврата, записи журнала и содержимое файлов (имена колонок, семейства типов, значения). В CI это отдельный шаг на каждой ОС.
 
 ```bash
 pip install -r requirements.txt
 python tests/parity/run_parity.py --rust src-rust/target/release/db-extractor
 ```
 
-Что в паритет не входит: Decimal и типы конкретных СУБД (SQLite их не имеет). Их проверяют модульные тесты `transform.rs`.
+Типы конкретных СУБД на SQLite не проверить. Для них есть отдельный workflow `databases.yml` (запуск вручную): те же сценарии на PostgreSQL 16 и Oracle Free 23 (таблицы создают `tests/parity/postgres.sql` и `tests/parity/oracle.sql`). Типы Oracle, которые читает только патч connectorx, проверяются в нём только в Rust-сборке по ожидаемому содержимому.

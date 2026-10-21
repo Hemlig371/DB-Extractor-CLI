@@ -146,8 +146,10 @@ fn run_query(item: &QueryParams, idx: usize, total: usize, ctx: &Ctx) -> Result<
         ctx.warn(message);
     }
 
-    // Устройства и каналы (например /dev/stdout) пишем напрямую, обычные файлы через временный.
-    let direct = out_path.exists() && !out_path.is_file();
+    // Устройства, каналы и ссылки (например /dev/stdout) пишем напрямую, обычные файлы через временный.
+    let direct = fs::symlink_metadata(out_path)
+        .map(|m| !m.file_type().is_file())
+        .unwrap_or(false);
     let target: PathBuf = if direct {
         out_path.to_path_buf()
     } else {

@@ -9,8 +9,9 @@ use connectorx::get_arrow::new_record_batch_iter;
 use connectorx::partition::{partition, PartitionQuery};
 use connectorx::source_router::SourceConn;
 use connectorx::sql::CXQuery;
+use dbx_core::connstr::rewrite_conn;
 
-use crate::guard::guard;
+use crate::guard::{describe, guard};
 
 pub struct Stream {
     iter: Box<dyn RecordBatchIterator>,
@@ -23,7 +24,8 @@ pub struct Stream {
 /// `partition`: (колонка, число частей) для параллельного чтения.
 pub fn open(conn: &str, sql: &str, partition_by: Option<(&str, usize)>, batch_size: usize) -> Result<Stream, String> {
     guard(|| -> Result<Stream, String> {
-        let source_conn = SourceConn::try_from(conn).map_err(|e| e.to_string())?;
+        let conn = rewrite_conn(conn);
+        let source_conn = SourceConn::try_from(conn.as_str()).map_err(|e| describe(&e))?;
 
         let (queries, origin_query): (Vec<CXQuery<String>>, Option<String>) = match partition_by {
             Some((column, num)) => {
@@ -31,14 +33,14 @@ pub fn open(conn: &str, sql: &str, partition_by: Option<(&str, usize)>, batch_si
                 // `-- комментарий` (например аннотация) иначе «съел» бы закрывающую скобку.
                 let query = format!("{}\n", sql);
                 let part = PartitionQuery::new(&query, column, None, None, num);
-                let queries = partition(&part, &source_conn).map_err(|e| e.to_string())?;
+                let queries = partition(&part, &source_conn).map_err(|e| describe(&e))?;
                 (queries, Some(query))
             }
             None => (vec![CXQuery::naked(sql)], None),
         };
 
         let iter =
-            new_record_batch_iter(&source_conn, origin_query, &queries, batch_size, None).map_err(|e| e.to_string())?;
+            new_record_batch_iter(&source_conn, origin_query, &queries, batch_size, None).map_err(|e| describe(&e))?;
         let schema = iter.get_schema().0.schema();
         Ok(Stream { iter, schema })
     })?

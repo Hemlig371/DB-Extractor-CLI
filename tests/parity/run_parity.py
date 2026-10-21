@@ -10,8 +10,10 @@
 и подробности расхождений. Код возврата 1, если есть расхождения.
 """
 import argparse
+import csv
 import datetime as dt
 import gzip
+import json
 import os
 import re
 import shutil
@@ -81,7 +83,13 @@ SCENARIOS = [
     sc("drop-nulls all", ["--drop-nulls"], ["o.parquet"], "parquet"),
     sc("drop-nulls selected", ["--drop-nulls", "email"], ["o.parquet"], "parquet"),
     sc("utc", ["--utc"], ["o.parquet"], "parquet"),
+    sc("utc csv", ["--utc"], ["o.csv"], "csv", sql="select id, name, created from people order by id"),
+    sc("utc jsonl", ["--utc"], ["o.jsonl"], "jsonl", sql="select id, name, created from people order by id"),
     sc("cast-universal", ["--cast-universal"], ["o.parquet"], "parquet"),
+    sc("cast-universal csv", ["--cast-universal"], ["o.csv"], "csv",
+       sql="select id, name, score, created, qty from people order by id"),
+    sc("cast-universal jsonl", ["--cast-universal"], ["o.jsonl"], "jsonl",
+       sql="select id, name, score, created, qty from people order by id"),
     sc("categorize", ["--categorize", "name"], ["o.parquet"], "parquet"),
     sc("empty result parquet", [], ["o.parquet"], "parquet", sql="select id, name from people where 1 = 0"),
     sc("empty result csv", [], ["o.csv"], "csv", sql="select id, name from people where 1 = 0"),
@@ -237,36 +245,95 @@ def prepare_csv(path):
     return path
 
 
+def check_expected(path, kind, expected):
+    """Сверка вывода Rust-сборки с ожидаемым содержимым (для сценариев rust_only)."""
+    if not os.path.exists(path):
+        return ["missing file"]
+    if kind == "csv":
+        with open(path, newline="", encoding="utf-8") as f:
+            actual = [row for row in csv.reader(f)]
+    elif kind == "jsonl":
+        with open(path, encoding="utf-8") as f:
+            actual = [json.loads(line) for line in f if line.strip()]
+    else:
+        return [f"unsupported kind for expectations: {kind}"]
+    if len(actual) != len(expected):
+        return [f"expected {len(expected)} lines, got {len(actual)}: {actual}"]
+    problems = []
+    for i, (got, want) in enumerate(zip(actual, expected)):
+        if isinstance(want, list):
+            if len(got) != len(want):
+                problems.append(f"line {i}: expected {want}, got {got}")
+                continue
+            for j, (g, w) in enumerate(zip(got, want)):
+                ok = bool(re.search(w[3:], g)) if w.startswith("re:") else g == w
+                if not ok:
+                    problems.append(f"line {i}, column {j}: expected {w!r}, got {g!r}")
+        elif got != want:
+            problems.append(f"line {i}: expected {want}, got {got}")
+    return problems
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--rust", required=True, help="path to the Rust db-extractor binary")
+    parser.add_argument("--suite", choices=["sqlite", "postgres", "oracle"], default="sqlite")
+    parser.add_argument("--conn", help="connection URI for the postgres and oracle suites (tables from *.sql)")
     parser.add_argument("--only", help="substring of the scenario name")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     opts = parser.parse_args()
 
     work = tempfile.mkdtemp(prefix="dbx-parity-")
-    db = os.path.join(work, "people.db")
-    make_db(db)
-    conn = "sqlite://" + urllib.parse.quote(db)
+    if opts.suite == "sqlite":
+        db = os.path.join(work, "people.db")
+        make_db(db)
+        conn = "sqlite://" + urllib.parse.quote(db)
+        scenarios = SCENARIOS
+    else:
+        if not opts.conn:
+            parser.error("--conn is required for the %s suite" % opts.suite)
+        from db_suites import SUITES
+        conn = opts.conn
+        scenarios = SUITES[opts.suite]
 
     py_cmd = [sys.executable, PY_MAIN, "-q"]
     rs_cmd = [os.path.abspath(opts.rust), "-q"]
 
     failures = 0
-    for index, scenario in enumerate(SCENARIOS):
+    for index, scenario in enumerate(scenarios):
         if opts.only and opts.only not in scenario["name"]:
             continue
         base = os.path.join(work, f"s{index:02d}")
-        py_proc, py_log = run_impl(py_cmd, scenario, conn, os.path.join(base, "py"))
+        rust_only = scenario.get("rust_only", False)
         rs_proc, rs_log = run_impl(rs_cmd, scenario, conn, os.path.join(base, "rs"))
+        if rust_only:
+            py_proc, py_log = None, ""
+        else:
+            py_proc, py_log = run_impl(py_cmd, scenario, conn, os.path.join(base, "py"))
 
         problems = []
+        if rust_only:
+            if rs_proc.returncode != scenario["exit_code"]:
+                problems.append(f"rust exit code {rs_proc.returncode}, expected {scenario['exit_code']}: "
+                                f"{(rs_proc.stdout + rs_proc.stderr).strip()[:600]} {rs_log.strip()[-600:]}")
+            else:
+                for out, expected in (scenario.get("expect") or {}).items():
+                    kind = scenario["kind"]
+                    problems += [f"{out}: {p}" for p in
+                                 check_expected(os.path.join(base, "rs", out), kind, expected)]
+            status = "PASS" if not problems else "FAIL"
+            failures += bool(problems)
+            print(f"[{status}] {scenario['name']} (rust only)")
+            for p in problems:
+                print(f"        - {p}")
+            continue
+
         if py_proc.returncode != scenario["exit_code"]:
             problems.append(f"python exit code {py_proc.returncode}, expected {scenario['exit_code']}: "
-                            f"{(py_proc.stdout + py_proc.stderr).strip()[:300]}")
+                            f"{(py_proc.stdout + py_proc.stderr).strip()[:300]} {py_log.strip()[-600:]}")
         if rs_proc.returncode != scenario["exit_code"]:
             problems.append(f"rust exit code {rs_proc.returncode}, expected {scenario['exit_code']}: "
-                            f"{(rs_proc.stdout + rs_proc.stderr).strip()[:300]}")
+                            f"{(rs_proc.stdout + rs_proc.stderr).strip()[:300]} {rs_log.strip()[-600:]}")
         if log_summary(py_log) != log_summary(rs_log):
             problems.append(f"log differs: python={log_summary(py_log)} rust={log_summary(rs_log)}")
 

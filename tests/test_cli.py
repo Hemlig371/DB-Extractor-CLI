@@ -3,11 +3,14 @@
 БД и polars здесь не нужны: чтение из БД подменяется, DataFrame заменён на FakeDF.
 """
 import os
+import shutil
+import sys
+import tempfile
 import time
 import threading
 import unittest
 
-from helpers import CliTestCase, FakeDF, FakePanic
+from helpers import CliTestCase, FakeDF, FakePanic, dbx
 
 CONN = "postgresql://user:pass@host:5432/db"
 BASE = ["--conn", CONN]
@@ -423,3 +426,19 @@ class WritingFiles(CliTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DirectWrites(unittest.TestCase):
+    @unittest.skipIf(sys.platform == "win32", "символические ссылки на Windows требуют прав")
+    def test_symlink_is_written_through_and_kept(self):
+        tmp = tempfile.mkdtemp(prefix="dbx_link_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        target = os.path.join(tmp, "real.txt")
+        link = os.path.join(tmp, "link.txt")
+        open(target, "w").close()
+        os.symlink(target, link)
+        dbx._write_atomic(link, lambda path: open(path, "w").write("data"))
+        self.assertTrue(os.path.islink(link))
+        with open(target) as f:
+            self.assertEqual(f.read(), "data")
+        self.assertEqual(sorted(os.listdir(tmp)), ["link.txt", "real.txt"])

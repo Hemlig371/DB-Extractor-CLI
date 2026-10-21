@@ -423,8 +423,8 @@ def _resolve_compression(item, out, fmt, args):
 
 def _write_atomic(out, writer):
     """Пишет во временный файл рядом с целевым и переименовывает после успеха."""
-    if os.path.exists(out) and not os.path.isfile(out):
-        writer(out)  # устройство или канал (например /dev/stdout)
+    if os.path.islink(out) or (os.path.exists(out) and not os.path.isfile(out)):
+        writer(out)  # устройство, канал или ссылка (например /dev/stdout): пишем напрямую, без rename
         return
     out_dir = os.path.dirname(os.path.abspath(out))
     tmp = os.path.join(out_dir, ".%s.%d.%d.tmp" % (os.path.basename(out), os.getpid(), threading.get_ident()))

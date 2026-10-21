@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["dbx-core", "db-extractor"]
+exclude = ["vendor/connectorx"]
 
 [profile.release]
 opt-level = 3

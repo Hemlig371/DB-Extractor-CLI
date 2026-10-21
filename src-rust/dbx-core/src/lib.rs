@@ -4,6 +4,7 @@
 pub mod annotations;
 pub mod columns;
 pub mod compression;
+pub mod connstr;
 pub mod logfmt;
 pub mod secrets;
 pub mod sqlsplit;

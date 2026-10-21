@@ -19,9 +19,43 @@ fn payload_message(payload: &(dyn Any + Send)) -> String {
     }
 }
 
+/// Текст ошибки вместе с цепочкой причин (`tokio-postgres` и другие драйверы кладут сообщение сервера в `source`).
+pub fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
+    let mut text = err.to_string();
+    let mut current = err.source();
+    while let Some(cause) = current {
+        let part = cause.to_string();
+        if !part.is_empty() && !text.contains(&part) {
+            text.push_str(": ");
+            text.push_str(&part);
+        }
+        current = cause.source();
+    }
+    text
+}
+
+/// Текст ошибки connectorx с цепочкой причин и подсказкой.
+pub fn describe(err: &(dyn std::error::Error + 'static)) -> String {
+    with_hint(&error_chain(err))
+}
+
 /// Добавляет подсказку к известным причинам сбоя.
 pub fn with_hint(message: &str) -> String {
     let lower = message.to_lowercase();
+    if lower.contains("timed out waiting for connection") {
+        return format!(
+            "{} -- could not connect: check host, port, user, password and network. The connection pool retries for \
+             30 seconds and hides the exact cause.",
+            message
+        );
+    }
+    if message.contains("Source Unknown not supported") {
+        return format!(
+            "{} -- unknown connection scheme. Supported: postgresql, redshift, mysql, mssql, oracle, sqlite, \
+             bigquery, clickhouse, trino.",
+            message
+        );
+    }
     if message.contains("DPI-1047") || lower.contains("oracle client library") {
         return format!(
             "{} -- Oracle Instant Client was not found. Install it (same bitness as db-extractor) and add its \
@@ -70,6 +104,43 @@ mod tests {
         let e = r.unwrap_err();
         assert!(e.contains("not implemented"), "{}", e);
         assert!(e.contains("TO_CHAR"), "{}", e);
+    }
+
+    #[test]
+    fn error_chain_joins_causes_without_repeats() {
+        use std::fmt;
+        #[derive(Debug)]
+        struct Outer(Inner);
+        #[derive(Debug)]
+        struct Inner(&'static str);
+        impl fmt::Display for Inner {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(self.0)
+            }
+        }
+        impl fmt::Display for Outer {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("db error")
+            }
+        }
+        impl std::error::Error for Inner {}
+        impl std::error::Error for Outer {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+        assert_eq!(
+            error_chain(&Outer(Inner("ERROR: relation \"x\" does not exist"))),
+            "db error: ERROR: relation \"x\" does not exist"
+        );
+        assert_eq!(error_chain(&Inner("db error")), "db error");
+        assert_eq!(error_chain(&Outer(Inner("db error"))), "db error");
+    }
+
+    #[test]
+    fn connection_and_scheme_hints() {
+        assert!(with_hint("timed out waiting for connection: db error").contains("check host"));
+        assert!(with_hint("Source Unknown not supported.").contains("Supported:"));
     }
 
     #[test]

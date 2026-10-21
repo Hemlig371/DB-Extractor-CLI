@@ -1,0 +1,125 @@
+name: Database parity (PostgreSQL, Oracle)
+
+on:
+  workflow_dispatch:
+    inputs:
+      postgres:
+        description: 'Проверить на PostgreSQL'
+        type: boolean
+        default: true
+      oracle:
+        description: 'Проверить на Oracle Free (долго: образ около 2 ГБ)'
+        type: boolean
+        default: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build the Linux binary
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-rust
+      - name: Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+      - name: Build release binary
+        working-directory: src-rust
+        run: cargo build --release -p db-extractor
+      - uses: actions/upload-artifact@v4
+        with:
+          name: db-extractor-linux
+          path: src-rust/target/release/db-extractor
+          if-no-files-found: error
+
+  postgres:
+    name: Python vs Rust on PostgreSQL 16
+    needs: build
+    if: ${{ inputs.postgres }}
+    runs-on: ubuntu-22.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --prefer-binary -r requirements.txt
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+      - uses: actions/download-artifact@v4
+        with:
+          name: db-extractor-linux
+          path: bin
+      - name: Create test tables
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -v ON_ERROR_STOP=1 -q -f tests/parity/postgres.sql
+      - name: Parity check on PostgreSQL
+        run: |
+          chmod +x bin/db-extractor
+          python tests/parity/run_parity.py --suite postgres --rust bin/db-extractor \
+            --conn "postgresql://postgres:postgres@localhost:5432/postgres" --keep
+
+  oracle:
+    name: Python vs Rust on Oracle Free 23
+    needs: build
+    if: ${{ inputs.oracle }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --prefer-binary -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: db-extractor-linux
+          path: bin
+      - name: Install Oracle Instant Client
+        run: |
+          sudo apt-get update && sudo apt-get install -y libaio1 unzip
+          curl -fsSL -o ic.zip https://download.oracle.com/otn_software/linux/instantclient/instantclient-basiclite-linuxx64.zip
+          sudo mkdir -p /opt/oracle
+          sudo unzip -q ic.zip -d /opt/oracle
+          IC=$(ls -d /opt/oracle/instantclient_* | head -n 1)
+          echo "Instant Client: $IC"
+          echo "LD_LIBRARY_PATH=$IC" >> "$GITHUB_ENV"
+      - name: Start Oracle Free
+        run: |
+          docker run -d --name oracle -p 1521:1521 \
+            -e ORACLE_PASSWORD=oracle -e APP_USER=dbx -e APP_USER_PASSWORD=dbxpass \
+            gvenzl/oracle-free:23-slim-faststart
+          for i in $(seq 1 90); do
+            if docker logs oracle 2>&1 | grep -q "DATABASE IS READY TO USE!"; then echo "ready after $((i * 5)) s"; exit 0; fi
+            sleep 5
+          done
+          docker logs oracle | tail -n 40
+          echo "Oracle did not start in time"
+          exit 1
+      - name: Create test tables
+        run: docker exec -i oracle sqlplus -s dbx/dbxpass@//localhost:1521/FREEPDB1 < tests/parity/oracle.sql
+      - name: Parity check on Oracle
+        run: |
+          chmod +x bin/db-extractor
+          python tests/parity/run_parity.py --suite oracle --rust bin/db-extractor \
+            --conn "oracle://dbx:dbxpass@localhost:1521/FREEPDB1" --keep
