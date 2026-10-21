@@ -224,7 +224,14 @@ fn string_cell<'a>(get: impl Fn(usize) -> &'a str + 'a, mode: Mode) -> Cell<'a> 
 }
 
 fn binary_cell<'a>(get: impl Fn(usize) -> &'a [u8] + 'a, mode: Mode) -> Cell<'a> {
-    Box::new(move |i, b| put_quoted(b, mode, |b| push_hex(b, get(i))))
+    Box::new(move |i, b| {
+        let bytes = get(i);
+        if bytes.is_empty() && mode == Mode::Csv {
+            b.extend_from_slice(b"\"\"");
+        } else {
+            put_quoted(b, mode, |b| push_hex(b, bytes));
+        }
+    })
 }
 
 fn build_cell<'a>(arr: &'a dyn Array, mode: Mode) -> Result<Cell<'a>, String> {
@@ -657,7 +664,7 @@ mod tests {
         let b = batch(vec![("dec", dec), ("bin", bin), ("flag", flag)]);
         assert_eq!(
             csv(&b),
-            "dec,bin,flag\n12.3456780000,00ff,true\n-0.0000000005,,false\n,,\n"
+            "dec,bin,flag\n12.3456780000,00ff,true\n-0.0000000005,\"\",false\n,,\n"
         );
         assert_eq!(
             jsonl(&b),

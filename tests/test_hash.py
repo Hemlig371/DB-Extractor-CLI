@@ -7,6 +7,9 @@ from helpers import dbx
 
 
 class HashText(unittest.TestCase):
+    def test_bytes_are_hashed_as_is(self):
+        self.assertEqual(dbx.hash_text(b"\xff\x00"), hashlib.sha256(b"\xff\x00").hexdigest())
+
     def test_plain_sha256(self):
         self.assertEqual(
             dbx.hash_text("abc"),

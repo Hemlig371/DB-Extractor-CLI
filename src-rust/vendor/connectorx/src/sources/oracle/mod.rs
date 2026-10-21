@@ -13,7 +13,7 @@ use crate::{
     sql::{count_query, limit0_query_oracle, CXQuery},
     utils::DummyBox,
 };
-use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, Utc};
 use fehler::{throw, throws};
 use log::debug;
 use owning_ref::OwningHandle;
@@ -371,9 +371,31 @@ impl_produce_text!(
     String,
     NaiveDate,
     NaiveDateTime,
-    DateTime<Utc>,
     Vec<u8>,
 );
+
+// rust-oracle читает DateTime<Utc> как местное время без учёта смещения; читаем со смещением и приводим к UTC.
+impl<'r, 'a> Produce<'r, DateTime<Utc>> for OracleTextSourceParser<'a> {
+    type Error = OracleSourceError;
+
+    #[throws(OracleSourceError)]
+    fn produce(&'r mut self) -> DateTime<Utc> {
+        let (ridx, cidx) = self.next_loc()?;
+        let res: DateTime<FixedOffset> = self.rowbuf[ridx].get(cidx)?;
+        res.with_timezone(&Utc)
+    }
+}
+
+impl<'r, 'a> Produce<'r, Option<DateTime<Utc>>> for OracleTextSourceParser<'a> {
+    type Error = OracleSourceError;
+
+    #[throws(OracleSourceError)]
+    fn produce(&'r mut self) -> Option<DateTime<Utc>> {
+        let (ridx, cidx) = self.next_loc()?;
+        let res: Option<DateTime<FixedOffset>> = self.rowbuf[ridx].get(cidx)?;
+        res.map(|v| v.with_timezone(&Utc))
+    }
+}
 
 // Manual implementation for Decimal since Oracle doesn't support it directly via FromSql
 impl<'r, 'a> Produce<'r, Decimal> for OracleTextSourceParser<'a> {

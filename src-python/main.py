@@ -281,7 +281,7 @@ def hash_text(value, salt=None):
     """SHA-256 текста в hex; с солью это HMAC-SHA256. None остаётся None."""
     if value is None:
         return None
-    data = value.encode("utf-8")
+    data = bytes(value) if isinstance(value, (bytes, bytearray)) else value.encode("utf-8")
     if salt:
         return hmac.new(salt.encode("utf-8"), data, hashlib.sha256).hexdigest()
     return hashlib.sha256(data).hexdigest()
@@ -494,8 +494,9 @@ def _process_query(item, idx, total, args):
                              "because unmasked data would be exposed." % ", ".join(missing))
         hash_salt = getattr(args, "hash_salt", None) or os.environ.get(SALT_ENV_VAR)
         for col in columns:
+            source = pl.col(col) if df.schema[col] == pl.Binary else pl.col(col).cast(pl.String)
             df = df.with_columns(
-                pl.col(col).cast(pl.String).map_elements(
+                source.map_elements(
                     lambda x: hash_text(x, hash_salt),
                     return_dtype=pl.String
                 ).alias(col)
