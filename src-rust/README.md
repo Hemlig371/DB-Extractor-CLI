@@ -65,4 +65,4 @@ pip install -r requirements.txt
 python tests/parity/run_parity.py --rust src-rust/target/release/db-extractor
 ```
 
-Типы конкретных СУБД проверяет workflow `databases.yml` (запуск вручную): те же сценарии на PostgreSQL 16 и Oracle Free 23, таблицы создают `tests/parity/postgres.sql`, `tests/parity/oracle.sql` и `tests/parity/clickhouse.sql`. Для ClickHouse Python-версия не работает (см. таблицу выше), поэтому Rust-сборка проверяется отдельно: код возврата, читаемость файлов и точные значения Decimal. Выгруженный Parquet (`--decimal-as float`, `string`, `decimal`) загружается обратно в ClickHouse. Типы Oracle, которые читает только Rust-сборка, проверяются по ожидаемому содержимому.
+Типы конкретных СУБД проверяет workflow `databases.yml` (запуск вручную): те же сценарии на PostgreSQL 16 и Oracle Free 23, таблицы создают `tests/parity/postgres.sql`, `tests/parity/oracle.sql` и `tests/parity/clickhouse.sql`. Для ClickHouse Python-версия не работает (см. таблицу выше), поэтому Rust-сборка проверяется отдельно: код возврата, читаемость файлов и точные значения Decimal. Типы Oracle, которые читает только Rust-сборка, проверяются по ожидаемому содержимому.

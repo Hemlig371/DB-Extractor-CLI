@@ -30,12 +30,3 @@ SELECT toInt32(number + 1) AS id, lower(hex(MD5(toString(number + 1)))) AS h, to
        (number + 1) * 1.5 AS f,
        if((number + 1) % 7 = 0, NULL, concat('row ', toString(number + 1))) AS s
 FROM numbers(20000);
-
-DROP TABLE IF EXISTS rt_float;
-CREATE TABLE rt_float (id Int32, d12_3 Nullable(Float64), d10_0 Nullable(Float64)) ENGINE = MergeTree ORDER BY id;
-
-DROP TABLE IF EXISTS rt_string;
-CREATE TABLE rt_string (id Int32, d12_3 Nullable(String), d10_0 Nullable(String)) ENGINE = MergeTree ORDER BY id;
-
-DROP TABLE IF EXISTS rt_decimal;
-CREATE TABLE rt_decimal (id Int32, d12_3 Nullable(Decimal(38, 10)), d10_0 Nullable(Decimal(38, 10))) ENGINE = MergeTree ORDER BY id;

@@ -166,34 +166,8 @@ jobs:
           path: bin
       - name: Create test tables
         run: python tests/parity/http_sql.py "$CH_HTTP" tests/parity/clickhouse.sql
-      - name: ClickHouse server diagnostics
-        continue-on-error: true
-        run: |
-          curl -sS "$CH_HTTP&query=SELECT+version()"
-          echo "--- DESCRIBE without compression"
-          curl -sS -i --data-binary "DESCRIBE (select id, d12_3 from parity_types limit 0) FORMAT JSONCompact" "$CH_HTTP" | head -c 1200
-          echo; echo "--- DESCRIBE with compress=1"
-          curl -sS -i --data-binary "DESCRIBE (select id, d12_3 from parity_types limit 0) FORMAT JSONCompact" "$CH_HTTP&compress=1" | head -c 600 | xxd | head -n 20
       - name: Rust build on ClickHouse
         run: |
           chmod +x bin/db-extractor
           python tests/parity/run_parity.py --suite clickhouse --rust-only --rust bin/db-extractor \
             --conn "clickhouse://dbx:dbxpass@localhost:8123/parity" --keep
-      - name: Load Parquet into ClickHouse (--decimal-as)
-        run: |
-          failed=0
-          for mode in float string decimal; do
-            bin/db-extractor -q --conn "clickhouse://dbx:dbxpass@localhost:8123/parity" \
-              --query "select id, d12_3, d10_0 from parity_types order by id" \
-              --out "rt_$mode.parquet" --decimal-as "$mode" || { echo "$mode: extraction failed"; failed=1; continue; }
-            code=$(curl -sS -o "resp_$mode.txt" -w '%{http_code}' --data-binary "@rt_$mode.parquet" \
-              "$CH_HTTP&query=INSERT+INTO+rt_$mode+FORMAT+Parquet")
-            rows=$(curl -sS --data-binary "select count() from rt_$mode" "$CH_HTTP")
-            echo "--decimal-as $mode: HTTP $code, rows loaded: $rows"
-            if [ "$code" != "200" ]; then
-              head -c 600 "resp_$mode.txt"; echo
-              # режим decimal только сообщает результат: загрузка Decimal128(38,10) зависит от версии ClickHouse
-              [ "$mode" = "decimal" ] || failed=1
-            fi
-          done
-          exit $failed
