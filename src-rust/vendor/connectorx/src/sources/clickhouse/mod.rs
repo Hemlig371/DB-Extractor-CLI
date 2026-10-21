@@ -57,7 +57,9 @@ impl ClickHouseSource {
             url.port().unwrap_or(8123)
         );
 
-        let mut client = Client::default().with_url(&base_url);
+        let mut client = Client::default()
+            .with_url(&base_url)
+            .with_compression(clickhouse::Compression::None);
 
         let database = url.path().trim_start_matches('/');
         if !database.is_empty() {

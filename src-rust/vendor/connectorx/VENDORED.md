@@ -19,4 +19,6 @@
 
 Смещение часового пояса: rust-oracle читает `DateTime<Utc>` как местное время и отбрасывает смещение, так что `03:04:05 +03:00` превращается в `03:04:05 UTC`. В копии значение читается как `DateTime<FixedOffset>` и приводится к UTC (`src/sources/oracle/mod.rs`).
 
+3. ClickHouse (`src/sources/clickhouse/mod.rs`): клиент создаётся с `Compression::None`, ответы сервера не сжимаются LZ4.
+
 При обновлении connectorx эти изменения переносятся в новую версию.

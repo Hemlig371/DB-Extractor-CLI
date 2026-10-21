@@ -166,6 +166,14 @@ jobs:
           path: bin
       - name: Create test tables
         run: python tests/parity/http_sql.py "$CH_HTTP" tests/parity/clickhouse.sql
+      - name: ClickHouse server diagnostics
+        continue-on-error: true
+        run: |
+          curl -sS "$CH_HTTP&query=SELECT+version()"
+          echo "--- DESCRIBE without compression"
+          curl -sS -i --data-binary "DESCRIBE (select id, d12_3 from parity_types limit 0) FORMAT JSONCompact" "$CH_HTTP" | head -c 1200
+          echo; echo "--- DESCRIBE with compress=1"
+          curl -sS -i --data-binary "DESCRIBE (select id, d12_3 from parity_types limit 0) FORMAT JSONCompact" "$CH_HTTP&compress=1" | head -c 600 | xxd | head -n 20
       - name: Parity check on ClickHouse
         run: |
           chmod +x bin/db-extractor

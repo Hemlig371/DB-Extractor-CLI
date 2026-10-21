@@ -148,7 +148,7 @@ class TransformTests(CliTestCase):
         self.assertEqual(out.schema["amt"], pl.Decimal(38, 10))
 
     def test_decimal_as_float_without_cast_universal(self):
-        df = pl.DataFrame({"id": [1]}).with_columns(decimal_series("amt", ["10.2500000000", None]))
+        df = pl.DataFrame({"id": [1, 2]}).with_columns(decimal_series("amt", ["10.2500000000", None]))
         out = self.read(self.extract(df, "--decimal-as", "float"))
         self.assertEqual(out.schema["amt"], pl.Float64)
         self.assertEqual(out["amt"].to_list(), [10.25, None])
