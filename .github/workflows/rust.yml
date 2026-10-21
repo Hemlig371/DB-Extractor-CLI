@@ -1,20 +1,6 @@
 name: Rust build and tests
 
 on:
-  push:
-    branches: [main]
-    tags: ['v*']
-    paths:
-      - 'src-rust/**'
-      - 'src-python/**'
-      - 'tests/parity/**'
-      - '.github/workflows/rust.yml'
-  pull_request:
-    paths:
-      - 'src-rust/**'
-      - 'src-python/**'
-      - 'tests/parity/**'
-      - '.github/workflows/rust.yml'
   workflow_dispatch:
     inputs:
       tag_name:
