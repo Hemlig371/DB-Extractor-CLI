@@ -22,7 +22,7 @@
 
 Параметры подключения (SSL и т. п.) передаются в query-части URI, подробности в [документации connectorx](https://sfu-db.github.io/connector-x/databases.html). Для Oracle на машине должен быть установлен Oracle Instant Client.
 
-Версии библиотек: `polars` 1.43.2 и новее (проверяется на 1.x и 2.x), `connectorx` 0.4.6 и новее (ClickHouse поддерживается начиная с 0.4.6).
+Версии библиотек: `polars` 1.43.2 и новее (проверяется на 1.x и 2.x), `connectorx` 0.4.6 и новее (ClickHouse поддерживается начиная с 0.4.6). Python-версия с `connectorx` из PyPI не смогла прочитать ClickHouse 26.9 (ошибка `decompression error: incorrect magic number`); Rust-сборка читает его без этой ошибки.
 
 ## Синтаксис
 

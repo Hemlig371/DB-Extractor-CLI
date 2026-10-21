@@ -12,6 +12,7 @@
 | Запуск | PyInstaller-пакет, папка с библиотеками | один исполняемый файл |
 | Источники | polars и connectorx из pip | connectorx 0.4.6, все источники собраны в бинарник, выбор по схеме URI во время работы |
 | Типы Oracle | `BOOLEAN`, `RAW`, `LONG RAW`, `NCLOB`, `INTERVAL`, `ROWID`, `TIMESTAMP WITH [LOCAL] TIME ZONE` нужно приводить в SQL | эти типы читаются |
+| ClickHouse | connectorx из PyPI завершается ошибкой `decompression error: incorrect magic number` на сервере 26.9 | читает (сжатие ответов отключено в копии connectorx) |
 | SQL Server на Linux | логин и пароль, интегрированная аутентификация (Kerberos) | только логин и пароль |
 | Порядок строк при партиционировании | не гарантируется | не гарантируется |
 | Сообщение `Extracted and processed N rows` | до записи файла | после записи всех строк, перед финализацией файла |
@@ -64,4 +65,4 @@ pip install -r requirements.txt
 python tests/parity/run_parity.py --rust src-rust/target/release/db-extractor
 ```
 
-Типы конкретных СУБД проверяет workflow `databases.yml` (запуск вручную): те же сценарии на PostgreSQL 16, Oracle Free 23 и ClickHouse, таблицы создают `tests/parity/postgres.sql`, `tests/parity/oracle.sql` и `tests/parity/clickhouse.sql`. Для ClickHouse дополнительно выгруженный Parquet (`--decimal-as float`, `string`, `decimal`) загружается обратно в ClickHouse. Типы Oracle, которые читает только Rust-сборка, проверяются по ожидаемому содержимому.
+Типы конкретных СУБД проверяет workflow `databases.yml` (запуск вручную): те же сценарии на PostgreSQL 16 и Oracle Free 23, таблицы создают `tests/parity/postgres.sql`, `tests/parity/oracle.sql` и `tests/parity/clickhouse.sql`. Для ClickHouse Python-версия не работает (см. таблицу выше), поэтому Rust-сборка проверяется отдельно: код возврата, читаемость файлов и точные значения Decimal. Выгруженный Parquet (`--decimal-as float`, `string`, `decimal`) загружается обратно в ClickHouse. Типы Oracle, которые читает только Rust-сборка, проверяются по ожидаемому содержимому.

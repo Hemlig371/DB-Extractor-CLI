@@ -1,4 +1,4 @@
-"""Сценарии сравнения Python и Rust на настоящих СУБД (PostgreSQL, Oracle, ClickHouse).
+"""Сценарии сравнения Python и Rust на настоящих СУБД (PostgreSQL, Oracle) и проверки Rust на ClickHouse.
 
 Таблицы создают postgres.sql, oracle.sql и clickhouse.sql. Сценарий с rust_only запускается только в Rust-сборке и
 сверяется с ожидаемым текстом: connectorx из PyPI (Python-версия) эти типы Oracle не читает.
@@ -171,6 +171,22 @@ CLICKHOUSE = [
     sc("ch decimal-as string parquet", ["--decimal-as", "string"], ["o.parquet"], "parquet", CH_NUMBERS),
     sc("ch decimal-as string csv", ["--decimal-as", "string"], ["o.csv"], "csv", CH_NUMBERS),
     sc("ch decimal-as string jsonl", ["--decimal-as", "string"], ["o.jsonl"], "jsonl", CH_NUMBERS),
+    sc("ch decimal-as string exact csv", ["--decimal-as", "string"], ["o.csv"], "csv",
+       "select id, d12_3, d10_0 from parity_types order by id", expect={"o.csv": [
+           ["id", "d12_3", "d10_0"],
+           ["1", "12345.6780000000", "42.0000000000"],
+           ["2", "", ""],
+           ["3", "-0.0010000000", "-7.0000000000"]]}),
+    sc("ch decimal-as string exact jsonl", ["--decimal-as", "string"], ["o.jsonl"], "jsonl",
+       "select id, d12_3, d10_0 from parity_types order by id", expect={"o.jsonl": [
+           {"id": 1, "d12_3": "12345.6780000000", "d10_0": "42.0000000000"},
+           {"id": 2, "d12_3": None, "d10_0": None},
+           {"id": 3, "d12_3": "-0.0010000000", "d10_0": "-7.0000000000"}]}),
+    sc("ch decimal-as float exact jsonl", ["--decimal-as", "float"], ["o.jsonl"], "jsonl",
+       "select id, d12_3, d10_0 from parity_types order by id", expect={"o.jsonl": [
+           {"id": 1, "d12_3": 12345.678, "d10_0": 42.0},
+           {"id": 2, "d12_3": None, "d10_0": None},
+           {"id": 3, "d12_3": -0.001, "d10_0": -7.0}]}),
     sc("ch decimal-as decimal with cast-universal", ["--cast-universal", "--decimal-as", "decimal"],
        ["o.parquet"], "parquet", CH_NUMBERS),
     sc("ch utc parquet", ["--utc"], ["o.parquet"], "parquet", CH_TIME),

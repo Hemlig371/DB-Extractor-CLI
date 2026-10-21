@@ -129,7 +129,7 @@ jobs:
             --conn "oracle://dbx:dbxpass@localhost:1521/FREEPDB1" --keep
 
   clickhouse:
-    name: Python vs Rust on ClickHouse
+    name: Rust on ClickHouse
     needs: build
     if: ${{ inputs.clickhouse }}
     runs-on: ubuntu-22.04
@@ -174,10 +174,10 @@ jobs:
           curl -sS -i --data-binary "DESCRIBE (select id, d12_3 from parity_types limit 0) FORMAT JSONCompact" "$CH_HTTP" | head -c 1200
           echo; echo "--- DESCRIBE with compress=1"
           curl -sS -i --data-binary "DESCRIBE (select id, d12_3 from parity_types limit 0) FORMAT JSONCompact" "$CH_HTTP&compress=1" | head -c 600 | xxd | head -n 20
-      - name: Parity check on ClickHouse
+      - name: Rust build on ClickHouse
         run: |
           chmod +x bin/db-extractor
-          python tests/parity/run_parity.py --suite clickhouse --rust bin/db-extractor \
+          python tests/parity/run_parity.py --suite clickhouse --rust-only --rust bin/db-extractor \
             --conn "clickhouse://dbx:dbxpass@localhost:8123/parity" --keep
       - name: Load Parquet into ClickHouse (--decimal-as)
         run: |

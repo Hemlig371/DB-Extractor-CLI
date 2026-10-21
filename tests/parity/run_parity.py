@@ -275,6 +275,19 @@ def prepare_csv(path):
     return path
 
 
+def check_readable(path):
+    """Файл есть и читается как Parquet, Arrow, CSV или JSONL по расширению."""
+    if not os.path.exists(path):
+        return ["missing file"]
+    kinds = {".parquet": "parquet", ".arrow": "arrow", ".csv": "csv", ".jsonl": "jsonl"}
+    kind = kinds.get(os.path.splitext(path)[1])
+    try:
+        read_file(prepare_csv(path) if kind == "csv" else path, kind)
+    except Exception as e:
+        return [f"cannot read the file: {e}"]
+    return []
+
+
 def check_expected(path, kind, expected):
     """Сверка вывода Rust-сборки с ожидаемым содержимым (для сценариев rust_only)."""
     if not os.path.exists(path):
@@ -309,6 +322,8 @@ def main():
     parser.add_argument("--rust", required=True, help="path to the Rust db-extractor binary")
     parser.add_argument("--suite", choices=["sqlite", "postgres", "oracle", "clickhouse"], default="sqlite")
     parser.add_argument("--conn", help="connection URI for the postgres, oracle and clickhouse suites (tables from *.sql)")
+    parser.add_argument("--rust-only", action="store_true",
+                        help="run only the Rust build: exit code, readable output files and expected values")
     parser.add_argument("--only", help="substring of the scenario name")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     opts = parser.parse_args()
@@ -334,7 +349,7 @@ def main():
         if opts.only and opts.only not in scenario["name"]:
             continue
         base = os.path.join(work, f"s{index:02d}")
-        rust_only = scenario.get("rust_only", False)
+        rust_only = scenario.get("rust_only", False) or opts.rust_only
         rs_proc, rs_log = run_impl(rs_cmd, scenario, conn, os.path.join(base, "rs"))
         if rust_only:
             py_proc, py_log = None, ""
@@ -347,6 +362,9 @@ def main():
                 problems.append(f"rust exit code {rs_proc.returncode}, expected {scenario['exit_code']}: "
                                 f"{(rs_proc.stdout + rs_proc.stderr).strip()[:600]} {rs_log.strip()[-600:]}")
             else:
+                for out in scenario["outs"]:
+                    if out not in (scenario.get("expect") or {}):
+                        problems += [f"{out}: {p}" for p in check_readable(os.path.join(base, "rs", out))]
                 for out, expected in (scenario.get("expect") or {}).items():
                     kind = scenario["kind"]
                     problems += [f"{out}: {p}" for p in
